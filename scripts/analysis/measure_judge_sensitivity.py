@@ -60,7 +60,7 @@ def get_judge_config_path(judge_name: str) -> Path:
 
 def measure_formatting_sensitivity(judge_name: str, 
                                  sample_data: pd.DataFrame,
-                                 num_neighbors: int = 10,
+                                 num_neighbors: int = 40,
                                  target_samples: int = 20,
                                  cost_budget_usd: float = 10.0) -> Dict[str, Any]:
     """
@@ -226,6 +226,13 @@ def measure_formatting_sensitivity(judge_name: str,
             except:
                 pass
         
+        # Capture baseline judgments from the estimator
+        baseline_scores = []
+        try:
+            baseline_scores = [float(x) for x in np.asarray(sensitivity_estimator._original_judgments).flatten()]
+        except Exception:
+            baseline_scores = []
+
         measurement_result = {
             'value': float(sensitivity_value),
             'confidence_interval': [float(ci) for ci in confidence_interval],
@@ -237,7 +244,8 @@ def measure_formatting_sensitivity(judge_name: str,
             'std_neighbor_difference': float(np.std(neighbor_differences)) if neighbor_differences else 0.0,
             'cost_info': cost_info,
             'diagnostics': diagnostics,
-            'formatting_samples': formatting_samples
+            'formatting_samples': formatting_samples,
+            'baseline_scores': baseline_scores
         }
         
         print(f"✅ Formatting sensitivity measured: {sensitivity_value:.4f} (95% CI: [{confidence_interval[0]:.4f}, {confidence_interval[1]:.4f}])")
@@ -325,7 +333,7 @@ def main():
                         help="Directory to save sensitivity profiles")
     parser.add_argument("--samples", "-s", type=int, default=20,
                         help="Number of samples to use for measurement")
-    parser.add_argument("--neighbors", "-n", type=int, default=10,
+    parser.add_argument("--neighbors", "-n", type=int, default=40,
                         help="Number of neighbors to generate")
     parser.add_argument("--budget", "-b", type=float, default=10.0,
                         help="Cost budget in USD for API calls")
@@ -383,6 +391,34 @@ def main():
             cost_budget_usd=args.budget
         )
         
+        # Compute Hamming-1 sensitivity using baseline scores only (no extra judge calls)
+        try:
+            baseline_scores = np.asarray(formatting_result.get('baseline_scores', [])).flatten()
+            if baseline_scores.size == 0:
+                raise ValueError("baseline_scores missing")
+            df_scores = pd.DataFrame({'score': baseline_scores})
+            hamming_estimator = ABBSensitivity(
+                judge_function=None,
+                neighbor_generator='hamming',
+                num_neighbors=args.neighbors,
+                target_samples=len(df_scores),
+                random_seed=42
+            )
+            hamming_estimator.fit(df_scores)
+            hamming_value = float(hamming_estimator.estimate())
+            print(f"📏 Hamming-1 sensitivity: {hamming_value:.4f}")
+        except Exception as e:
+            print(f"⚠️  Could not compute Hamming-1 sensitivity from baseline scores: {e}")
+            hamming_value = None
+
+        # Augment results with combined average if available
+        if hamming_value is not None:
+            formatting_result['hamming_sensitivity'] = {
+                'value': hamming_value,
+                'neighbors_generated': int(args.neighbors)
+            }
+            formatting_result['combined_average_sensitivity'] = float((formatting_result['value'] + hamming_value) / 2.0)
+
         # Save sensitivity profile
         profile_file = save_sensitivity_profile(
             judge_name=args.judge,
@@ -399,6 +435,9 @@ def main():
             print(f"   95% Confidence interval: [{ci[0]:.4f}, {ci[1]:.4f}]")
             print(f"   Samples used: {formatting_result['samples_used']}")
             print(f"   Neighbors generated: {formatting_result['neighbors_generated']}")
+            if 'hamming_sensitivity' in formatting_result:
+                print(f"   Hamming-1 sensitivity: {formatting_result['hamming_sensitivity']['value']:.4f}")
+                print(f"   Combined average (fmt + ham)/2: {formatting_result['combined_average_sensitivity']:.4f}")
         else:
             print(f"❌ Measurement failed: {formatting_result['error']}")
             return 1

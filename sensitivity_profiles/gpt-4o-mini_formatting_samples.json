@@ -1,77 +1,17 @@
 {
   "judge_name": "gpt-4o-mini",
-  "created_date": "2025-09-05T14:33:56.756578+00:00",
+  "created_date": "2025-09-05T14:50:34.186562+00:00",
   "description": "Sample formatting neighbor transformations for manual inspection",
   "samples": [
     {
-      "question_id": "328c149ed45a41c0b9d6f14659e63599",
-      "model": "gpt-4-0613",
-      "changed_field": "answer_b",
-      "original_response": "Sure, here's a simple example of a folk tune written in ABC notation:\n\n```\nX:1\nT:Simple Folk Tune\nM:4/4\nL:1/4\nK:C\nC2 E2 | G2 E2 | F2 D2 | C4 |\nG2 A2 | B2 A2 | G2 E2 | D4 |\nC2 E2 | G2 E2 | F2 D2 | C4 |\nG2 A2 | B2 A2 | G2 E2 | D4 |\n```\n\nThis is a very basic melody in the key of C major. The rhythm is quite straightforward, with each bar containing four quarter notes (crotchets). The melody moves up and down the scale in a way that is typical of many folk tunes.",
-      "neighbors": [
-        "Sure, here's a simple example of a folk tune written in ABC notation: ``` X:1 T:Simple Folk Tune M:4/4 L:1/4 K:C C2 E2 | G2 E2 | F2 D2 | C4 | G2 A2 | B2 A2 | G2 E2 | D4 | C2 E2 | G2 E2 | F2 D2 | C4 | G2 A2 | B2 A2 | G2 E2 | D4 | ``` This is a very basic   melody in the key of C major. The rhythm is quite straightforward, with each bar containing four quarter notes (crotchets). The melody moves up and down the scale in a way that is typical of many folk tunes."
-      ],
-      "diff": "--- original\n+++ neighbor\n@@ -1,15 +1 @@\n-Sure, here's a simple example of a folk tune written in ABC notation:\n-\n-```\n-X:1\n-T:Simple Folk Tune\n-M:4/4\n-L:1/4\n-K:C\n-C2 E2 | G2 E2 | F2 D2 | C4 |\n-G2 A2 | B2 A2 | G2 E2 | D4 |\n-C2 E2 | G2 E2 | F2 D2 | C4 |\n-G2 A2 | B2 A2 | G2 E2 | D4 |\n-```\n-\n-This is a very basic melody in the key of C major. The rhythm is quite straightforward, with each bar containing four quarter notes (crotchets). The melody moves up and down the scale in a way that is typical of many folk tunes.\n+Sure, here's a simple example of a folk tune written in ABC notation: ``` X:1 T:Simple Folk Tune M:4/4 L:1/4 K:C C2 E2 | G2 E2 | F2 D2 | C4 | G2 A2 | B2 A2 | G2 E2 | D4 | C2 E2 | G2 E2 | F2 D2 | C4 | G2 A2 | B2 A2 | G2 E2 | D4 | ``` This is a very basic   melody in the key of C major. The rhythm is quite straightforward, with each bar containing four quarter notes (crotchets). The melody moves up and down the scale in a way that is typical of many folk tunes.",
-      "original_judgment": {
-        "pairwise": "A>B",
-        "score": 2.0
-      },
-      "neighbor_judgments": [
-        {
-          "pairwise": "B>A",
-          "score": 4.0
-        }
-      ]
-    },
-    {
-      "question_id": "328c149ed45a41c0b9d6f14659e63599",
-      "model": "gpt-4-0613",
-      "changed_field": "answer_b",
-      "original_response": "Sure, here's a simple example of a folk tune written in ABC notation:\n\n```\nX:1\nT:Simple Folk Tune\nM:4/4\nL:1/4\nK:C\nC2 E2 | G2 E2 | F2 D2 | C4 |\nG2 A2 | B2 A2 | G2 E2 | D4 |\nC2 E2 | G2 E2 | F2 D2 | C4 |\nG2 A2 | B2 A2 | G2 E2 | D4 |\n```\n\nThis is a very basic melody in the key of C major. The rhythm is quite straightforward, with each bar containing four quarter notes (crotchets). The melody moves up and down the scale in a way that is typical of many folk tunes.",
-      "neighbors": [
-        "Sure, here's a simple example of a folk tune written in ABC notation:\n\n```\nX:1\nT:Simple Folk Tune\nM:4/4\nL:1/4\nK:C\nC2 E2 | G2 E2 | F2 D2 | C4 |\nG2 A2 | B2 A2 | G2 E2 | D4 |\nC2 E2 | G2 E2 | F2 D2 | C4 |\nG2 A2 | B2 A2 | G2 E2 | D4 |\n```\n\nThis is a very basic melody in the key of C major. The rhythm is quite straightforward, with each bar containing four quarter notes (crotchets). The melody moves up and down the scale in a way that is typical of many folk tunes"
-      ],
-      "diff": "--- original\n+++ neighbor\n@@ -12,4 +12,4 @@\n G2 A2 | B2 A2 | G2 E2 | D4 |\n ```\n \n-This is a very basic melody in the key of C major. The rhythm is quite straightforward, with each bar containing four quarter notes (crotchets). The melody moves up and down the scale in a way that is typical of many folk tunes.\n+This is a very basic melody in the key of C major. The rhythm is quite straightforward, with each bar containing four quarter notes (crotchets). The melody moves up and down the scale in a way that is typical of many folk tunes",
-      "original_judgment": {
-        "pairwise": "A>B",
-        "score": 2.0
-      },
-      "neighbor_judgments": [
-        {
-          "pairwise": "A>B",
-          "score": 2.0
-        }
-      ]
-    },
-    {
-      "question_id": "6b31320632de4e0bbf9b63d3cc78c58e",
+      "question_id": "3f85bf93f18343dbb17e228a214a3800",
       "model": "Llama-3-8B-Tulu-330K",
       "changed_field": "answer_b",
-      "original_response": "(a) In the first round, the probability that the two players meet is $\\frac{1}{2^n}$, since there are $2^n$ players and each player has an equal chance of being chosen.\n\n(b) In the final, the probability that the two players meet is $\\frac{1}{2}$, since there are only two players left and they must meet in the final.\n\n(c) In any round, the probability that the two players meet is $\\frac{2^{n-1}}{2^n} = \\frac{1}{2}$, since there are $2^{n-1}$ players left in the tournament and each player has an equal chance of being chosen.<|eot_id|>",
+      "original_response": "Here's a chord progression in the key of C major that could sound sad and slow:\n\nC - Am - F - G\n\nThis progression uses the I, vi, IV, and V chords in the key of C major. The Am chord is a minor chord, which can add a sense of sadness to the progression. The slow tempo can also contribute to a melancholic feel. You can experiment with different rhythms and instrumentation to further enhance the emotional impact of this progression.<|eot_id|>",
       "neighbors": [
-        "(a) In the first round, the probability that the two players meet is $\\frac{1}{2^n}$, since there are $2^n$ players and each player has an equal chance of being chosen. (b) In the final, the probability that the two players meet is $\\frac{1}{2}$, since there are only two players left and they must meet in the final. (c) In any round, the probability that the two players meet is $\\frac{2^{n-1}}{2^n} = \\frac{1}{2}$, since there are $2^{n-1}$ players left in the tournament and each player has an equal chance of being chosen.<|eot_id|>"
+        "Here's a chord progression in the key of C major that could sound sad and slow: C - Am - F - G This progression uses the I, vi, IV, and V chords in the key of C major. The Am chord is a minor chord, which can add a sense of sadness to the progression. The slow tempo can also contribute to a melancholic feel. You can experiment with different   rhythms and instrumentation to further enhance the emotional impact of this progression.<|eot_id|>"
       ],
-      "diff": "--- original\n+++ neighbor\n@@ -1,5 +1 @@\n-(a) In the first round, the probability that the two players meet is $\\frac{1}{2^n}$, since there are $2^n$ players and each player has an equal chance of being chosen.\n-\n-(b) In the final, the probability that the two players meet is $\\frac{1}{2}$, since there are only two players left and they must meet in the final.\n-\n-(c) In any round, the probability that the two players meet is $\\frac{2^{n-1}}{2^n} = \\frac{1}{2}$, since there are $2^{n-1}$ players left in the tournament and each player has an equal chance of being chosen.<|eot_id|>\n+(a) In the first round, the probability that the two players meet is $\\frac{1}{2^n}$, since there are $2^n$ players and each player has an equal chance of being chosen. (b) In the final, the probability that the two players meet is $\\frac{1}{2}$, since there are only two players left and they must meet in the final. (c) In any round, the probability that the two players meet is $\\frac{2^{n-1}}{2^n} = \\frac{1}{2}$, since there are $2^{n-1}$ players left in the tournament and each player has an equal chance of being chosen.<|eot_id|>",
-      "original_judgment": {
-        "pairwise": "A>B",
-        "score": 2.0
-      },
-      "neighbor_judgments": [
-        {
-          "pairwise": "A>B",
-          "score": 2.0
-        }
-      ]
-    },
-    {
-      "question_id": "847e0891929a4521aee127ee20b50e30",
-      "model": "gpt-4-0613",
-      "changed_field": "answer_b",
-      "original_response": "To add a toolbar in a fragment, you can follow these steps:\n\n1. First, add a Toolbar widget in your fragment's layout XML file. Here's an example:\n\n```xml\n<androidx.appcompat.widget.Toolbar\n    android:id=\"@+id/toolbar\"\n    android:layout_width=\"match_parent\"\n    android:layout_height=\"?attr/actionBarSize\"\n    android:background=\"?attr/colorPrimary\"\n    app:popupTheme=\"@style/AppTheme.PopupOverlay\" />\n```\n\n2. Then, in your Fragment class, you need to set the Toolbar as the ActionBar. Here's how you can do it:\n\n```java\nimport androidx.appcompat.app.AppCompatActivity;\nimport androidx.appcompat.widget.Toolbar;\n\npublic class MyFragment extends Fragment {\n\n    @Override\n    public View onCreateView(LayoutInflater inflater, ViewGroup container,\n                             Bundle savedInstanceState) {\n        View view = inflater.inflate(R.layout.fragment_my, container, false);\n\n        Toolbar toolbar = (Toolbar) view.findViewById(R.id.toolbar);\n        ((AppCompatActivity)getActivity()).setSupportActionBar(toolbar);\n\n        // If you want to add a title\n        ((AppCompatActivity)getActivity()).getSupportActionBar().setTitle(\"My Fragment\");\n\n        return view;\n    }\n}\n```\n\nRemember, you need to cast the getActivity() to AppCompatActivity before calling the setSupportActionBar() method.\n\nAlso, if you want to add menu items to your toolbar, you need to override the onCreateOptionsMenu() method in your fragment and inflate the menu XML file.\n\n```java\n@Override\npublic void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {\n    inflater.inflate(R.menu.menu_main, menu);\n    super.onCreateOptionsMenu(menu, inflater);\n}\n```\n\nDon't forget to call setHasOptionsMenu(true) in the onCreate() or onCreateView() method of your fragment.\n\n```java\n@Override\npublic void onCreate(Bundle savedInstanceState) {\n    super.onCreate(savedInstanceState);\n    setHasOptionsMenu(true);\n}\n```\n\nThis is a basic way to add a toolbar in a fragment. Depending on your needs, you might need to adjust this code.",
-      "neighbors": [
-        "To add a toolbar in a fragment, you can follow these steps: 1. First, add a Toolbar widget in your fragment's layout XML file. Here's an example: ```xml <androidx.appcompat.widget.Toolbar android:id=\"@+id/toolbar\" android:layout_width=\"match_parent\" android:layout_height=\"?attr/actionBarSize\" android:background=\"?attr/colorPrimary\" app:popupTheme=\"@style/AppTheme.PopupOverlay\" /> ``` 2. Then, in your Fragment class, you need to set the Toolbar as the ActionBar. Here's how you can do it: ```java import androidx.appcompat.app.AppCompatActivity; import androidx.appcompat.widget.Toolbar; public class MyFragment extends Fragment { @Override public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) { View view = inflater.inflate(R.layout.fragment_my, container, false); Toolbar toolbar = (Toolbar) view.findViewById(R.id.toolbar); ((AppCompatActivity)getActivity()).setSupportActionBar(toolbar); // If you want to add a title ((AppCompatActivity)getActivity()).getSupportActionBar().setTitle(\"My Fragment\"); return view; } } ``` Remember, you need to cast the getActivity() to AppCompatActivity before calling the setSupportActionBar() method. Also, if you want to add menu items to your toolbar, you need to override the onCreateOptionsMenu() method in your fragment and inflate the menu XML file. ```java @Override public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) { inflater.inflate(R.menu.menu_main, menu); super.onCreateOptionsMenu(menu, inflater); } ``` Don't forget to call setHasOptionsMenu(true) in the onCreate() or onCreateView() method of your fragment. ```java @Override public void onCreate(Bundle savedInstanceState) { super.onCreate(savedInstanceState); setHasOptionsMenu(true); } ``` This is a basic way to add a toolbar in a fragment. Depending on your needs, you might need to adjust this code."
-      ],
-      "diff": "--- original\n+++ neighbor\n@@ -1,60 +1 @@\n-To add a toolbar in a fragment, you can follow these steps:\n-\n-1. First, add a Toolbar widget in your fragment's layout XML file. Here's an example:\n-\n-```xml\n-<androidx.appcompat.widget.Toolbar\n-    android:id=\"@+id/toolbar\"\n-    android:layout_width=\"match_parent\"\n-    android:layout_height=\"?attr/actionBarSize\"\n-    android:background=\"?attr/colorPrimary\"\n-    app:popupTheme=\"@style/AppTheme.PopupOverlay\" />\n-```\n-\n-2. Then, in your Fragment class, you need to set the Toolbar as the ActionBar. Here's how you can do it:\n-\n-```java\n-import androidx.appcompat.app.AppCompatActivity;\n-import androidx.appcompat.widget.Toolbar;\n-\n-public class MyFragment extends Fragment {\n-\n-    @Override\n-    public View onCreateView(LayoutInflater inflater, ViewGroup container,\n-                             Bundle savedInstanceState) {\n-        View view = inflater.inflate(R.layout.fragment_my, container, false);\n-\n-        Toolbar toolbar = (Toolbar) view.findViewById(R.id.toolbar);\n-        ((AppCompatActivity)getActivity()).setSupportActionBar(toolbar);\n-\n-        // If you want to add a title\n-        ((AppCompatActivity)getActivity()).getSupportActionBar().setTitle(\"My Fragment\");\n-\n-        return view;\n-    }\n-}\n-```\n-\n-Remember, you need to cast the getActivity() to AppCompatActivity before calling the setSupportActionBar() method.\n-\n-Also, if you want to add menu items to your toolbar, you need to override the onCreateOptionsMenu() method in your fragment and inflate the menu XML file.\n-\n-```java\n-@Override\n-public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {\n-    inflater.inflate(R.menu.menu_main, menu);\n-    super.onCreateOptionsMenu(menu, inflater);\n-}\n-```\n-\n-Don't forget to call setHasOptionsMenu(true) in the onCreate() or onCreateView() method of your fragment.\n-\n-```java\n-@Override\n-public void onCreate(Bundle savedInstanceState) {\n-    super.onCreate(savedInstanceState);\n-    setHasOptionsMenu(true);\n-}\n-```\n-\n-This is a basic way to add a toolbar in a fragment. Depending on your needs, you might need to adjust this code.\n+To add a toolbar in a fragment, you can follow these steps: 1. First, add a Toolbar widget in your fragment's layout XML file. Here's an example: ```xml <androidx.appcompat.widget.Toolbar android:id=\"@+id/toolbar\" android:layout_width=\"match_parent\" android:layout_height=\"?attr/actionBarSize\" android:background=\"?attr/colorPrimary\" app:popupTheme=\"@style/AppTheme.PopupOverlay\" /> ``` 2. Then, in your Fragment class, you need to set the Toolbar as the ActionBar. Here's how you can do it: ```java import androidx.appcompat.app.AppCompatActivity; import androidx.appcompat.widget.Toolbar; public class MyFragment extends Fragment { @Override public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) { View view = inflater.inflate(R.layout.fragment_my, container, false); Toolbar toolbar = (Toolbar) view.findViewById(R.id.toolbar); ((AppCompatActivity)getActivity()).setSupportActionBar(toolbar); // If you want to add a title ((AppCompatActivity)getActivity()).getSupportActionBar().setTitle(\"My Fragment\"); return view; } } ``` Remember, you need to cast the getActivity() to AppCompatActivity before calling the setSupportActionBar() method. Also, if you want to add menu items to your toolbar, you need to override the onCreateOptionsMenu() method in your fragment and inflate the menu XML file. ```java @Override public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) { inflater.inflate(R.menu.menu_main, menu); super.onCreateOptionsMenu(menu, inflater); } ``` Don't forget to call setHasOptionsMenu(true) in the onCreate() or onCreateView() method of your fragment. ```java @Override public void onCreate(Bundle savedInstanceState) { super.onCreate(savedInstanceState); setHasOptionsMenu(true); } ``` This is a basic way to add a toolbar in a fragment. Depending on your needs, you might need to adjust this code.",
+      "diff": "--- original\n+++ neighbor\n@@ -1,5 +1 @@\n-Here's a chord progression in the key of C major that could sound sad and slow:\n-\n-C - Am - F - G\n-\n-This progression uses the I, vi, IV, and V chords in the key of C major. The Am chord is a minor chord, which can add a sense of sadness to the progression. The slow tempo can also contribute to a melancholic feel. You can experiment with different rhythms and instrumentation to further enhance the emotional impact of this progression.<|eot_id|>\n+Here's a chord progression in the key of C major that could sound sad and slow: C - Am - F - G This progression uses the I, vi, IV, and V chords in the key of C major. The Am chord is a minor chord, which can add a sense of sadness to the progression. The slow tempo can also contribute to a melancholic feel. You can experiment with different   rhythms and instrumentation to further enhance the emotional impact of this progression.<|eot_id|>",
       "original_judgment": {
         "pairwise": "A>>B",
         "score": 1.0
@@ -84,22 +24,82 @@
       ]
     },
     {
-      "question_id": "f54e99e9686549e7a096dd16dbab28e1",
+      "question_id": "3f85bf93f18343dbb17e228a214a3800",
       "model": "Llama-3-8B-Tulu-330K",
       "changed_field": "answer_b",
-      "original_response": "Memory usage is a critical factor in the performance of AWS Lambda functions written in Node.js. When a Lambda function is executed, it is allocated a certain amount of memory, and the function must complete its execution within that memory limit. If the function exceeds its memory limit, it will be terminated and an error will be returned.\n\nIn general, the more memory a Lambda function uses, the slower it will perform. This is because the function will have to spend more time allocating and deallocating memory, which can slow down the execution of the function. Additionally, if the function uses too much memory, it may cause the Lambda service to run out of memory, which can cause other functions to be terminated.\n\nTo optimize the performance of a Lambda function written in Node.js, it is important to keep the memory usage as low as possible while still meeting the requirements of the function. This can be achieved by using efficient algorithms, minimizing the use of global variables, and avoiding the use of unnecessary libraries or modules.\n\nIt is also important to note that the amount of memory allocated to a Lambda function can affect its cost. The more memory a function uses, the higher its cost will be. Therefore, it is important to strike a balance between the performance requirements of the function and the cost of running it.<|eot_id|>",
+      "original_response": "Here's a chord progression in the key of C major that could sound sad and slow:\n\nC - Am - F - G\n\nThis progression uses the I, vi, IV, and V chords in the key of C major. The Am chord is a minor chord, which can add a sense of sadness to the progression. The slow tempo can also contribute to a melancholic feel. You can experiment with different rhythms and instrumentation to further enhance the emotional impact of this progression.<|eot_id|>",
       "neighbors": [
-        "Memory usage is A critical factor in the performance of AWS Lambda functions written in Node.js. When A Lambda function is executed, it is allocated A certain amount of memory, and the function must complete its execution within that memory limit. If THE function exceeds its memory limit, it will be terminated and AN error will be returned. in general, the more memory a Lambda function uses, the slower it will perform. This is because the function will have to spend more time allocating and deallocating memory, which can slow down the execution of THE function. Additionally, if the function uses too much memory, it may cause the Lambda service to run out of memory, which can cause other functions TO be terminated. to optimize THE performance of a Lambda function written in Node.js, it is important to keep THE memory usage as low as possible while still meeting the requirements of THE function. This can be achieved by using efficient algorithms, minimizing the use of global variables, AND avoiding the use of unnecessary libraries OR modules. It is also important to note that the amount of memory allocated to a Lambda function can affect its cost. The more memory a function uses, the higher its cost will be. Therefore, it is important to strike a balance between the performance requirements of the function and the cost of running it.<|eot_id|>"
+        "Here's a chord progression in the key of C major that could sound sad and slow:\n\nC - Am - F - G\n\nThis progression uses the I, vi, IV, and V chords in the key of C major. The Am chord is a minor chord, which can add a sense of sadness to the progression. The slow tempo can also contribute to a melancholic feel. You can experiment with different rhythms and instrumentation to further enhance the emotional impact of this progression.<|eot_id|>?"
       ],
-      "diff": "--- original\n+++ neighbor\n@@ -1,7 +1 @@\n-Memory usage is a critical factor in the performance of AWS Lambda functions written in Node.js. When a Lambda function is executed, it is allocated a certain amount of memory, and the function must complete its execution within that memory limit. If the function exceeds its memory limit, it will be terminated and an error will be returned.\n-\n-In general, the more memory a Lambda function uses, the slower it will perform. This is because the function will have to spend more time allocating and deallocating memory, which can slow down the execution of the function. Additionally, if the function uses too much memory, it may cause the Lambda service to run out of memory, which can cause other functions to be terminated.\n-\n-To optimize the performance of a Lambda function written in Node.js, it is important to keep the memory usage as low as possible while still meeting the requirements of the function. This can be achieved by using efficient algorithms, minimizing the use of global variables, and avoiding the use of unnecessary libraries or modules.\n-\n-It is also important to note that the amount of memory allocated to a Lambda function can affect its cost. The more memory a function uses, the higher its cost will be. Therefore, it is important to strike a balance between the performance requirements of the function and the cost of running it.<|eot_id|>\n+Memory usage is A critical factor in the performance of AWS Lambda functions written in Node.js. When A Lambda function is executed, it is allocated A certain amount of memory, and the function must complete its execution within that memory limit. If THE function exceeds its memory limit, it will be terminated and AN error will be returned. in general, the more memory a Lambda function uses, the slower it will perform. This is because the function will have to spend more time allocating and deallocating memory, which can slow down the execution of THE function. Additionally, if the function uses too much memory, it may cause the Lambda service to run out of memory, which can cause other functions TO be terminated. to optimize THE performance of a Lambda function written in Node.js, it is important to keep THE memory usage as low as possible while still meeting the requirements of THE function. This can be achieved by using efficient algorithms, minimizing the use of global variables, AND avoiding the use of unnecessary libraries OR modules. It is also important to note that the amount of memory allocated to a Lambda function can affect its cost. The more memory a function uses, the higher its cost will be. Therefore, it is important to strike a balance between the performance requirements of the function and the cost of running it.<|eot_id|>",
+      "diff": "--- original\n+++ neighbor\n@@ -2,4 +2,4 @@\n \n C - Am - F - G\n \n-This progression uses the I, vi, IV, and V chords in the key of C major. The Am chord is a minor chord, which can add a sense of sadness to the progression. The slow tempo can also contribute to a melancholic feel. You can experiment with different rhythms and instrumentation to further enhance the emotional impact of this progression.<|eot_id|>\n+This progression uses the I, vi, IV, and V chords in the key of C major. The Am chord is a minor chord, which can add a sense of sadness to the progression. The slow tempo can also contribute to a melancholic feel. You can experiment with different rhythms and instrumentation to further enhance the emotional impact of this progression.<|eot_id|>?",
+      "original_judgment": {
+        "pairwise": "A>>B",
+        "score": 1.0
+      },
+      "neighbor_judgments": [
+        {
+          "pairwise": "B>A",
+          "score": 4.0
+        }
+      ]
+    },
+    {
+      "question_id": "3f85bf93f18343dbb17e228a214a3800",
+      "model": "Llama-3-8B-Tulu-330K",
+      "changed_field": "answer_b",
+      "original_response": "Here's a chord progression in the key of C major that could sound sad and slow:\n\nC - Am - F - G\n\nThis progression uses the I, vi, IV, and V chords in the key of C major. The Am chord is a minor chord, which can add a sense of sadness to the progression. The slow tempo can also contribute to a melancholic feel. You can experiment with different rhythms and instrumentation to further enhance the emotional impact of this progression.<|eot_id|>",
+      "neighbors": [
+        "Here's a chord progression in the key of C major that could sound sad and slow:\n\nC - Am - F - G\n\nThis progression uses the I, vi, IV, and V chords in the key of C major. The Am chord is a minor chord, which can add a sense of sadness to the progression. The slow tempo can also contribute to a melancholic feel. You can experiment with different rhythms and instrumentation to further enhance the emotional impact of this progression.<|eot_id|>!"
+      ],
+      "diff": "--- original\n+++ neighbor\n@@ -2,4 +2,4 @@\n \n C - Am - F - G\n \n-This progression uses the I, vi, IV, and V chords in the key of C major. The Am chord is a minor chord, which can add a sense of sadness to the progression. The slow tempo can also contribute to a melancholic feel. You can experiment with different rhythms and instrumentation to further enhance the emotional impact of this progression.<|eot_id|>\n+This progression uses the I, vi, IV, and V chords in the key of C major. The Am chord is a minor chord, which can add a sense of sadness to the progression. The slow tempo can also contribute to a melancholic feel. You can experiment with different rhythms and instrumentation to further enhance the emotional impact of this progression.<|eot_id|>!",
       "original_judgment": {
         "pairwise": "A>B",
         "score": 2.0
       },
       "neighbor_judgments": [
         {
+          "pairwise": "A=B",
+          "score": 3.0
+        }
+      ]
+    },
+    {
+      "question_id": "328c149ed45a41c0b9d6f14659e63599",
+      "model": "gpt-4-0613",
+      "changed_field": "answer_b",
+      "original_response": "Sure, here's a simple example of a folk tune written in ABC notation:\n\n```\nX:1\nT:Simple Folk Tune\nM:4/4\nL:1/4\nK:C\nC2 E2 | G2 E2 | F2 D2 | C4 |\nG2 A2 | B2 A2 | G2 E2 | D4 |\nC2 E2 | G2 E2 | F2 D2 | C4 |\nG2 A2 | B2 A2 | G2 E2 | D4 |\n```\n\nThis is a very basic melody in the key of C major. The rhythm is quite straightforward, with each bar containing four quarter notes (crotchets). The melody moves up and down the scale in a way that is typical of many folk tunes.",
+      "neighbors": [
+        "Sure, here's A simple example of a folk tune written in ABC notation: ``` X:1 T:Simple Folk Tune M:4/4 L:1/4 K:C C2 E2 | G2 E2 | F2 D2 | C4 | G2 A2 | B2 A2 | G2 E2 | D4 | C2 E2 | G2 E2 | F2 D2 | C4 | G2 A2 | B2 A2 | G2 E2 | D4 | ``` This is a very basic melody IN THE key of C major. The rhythm is quite straightforward, with each bar containing four quarter notes (crotchets). the melody moves up and down THE scale IN a way that is typical of many folk tunes."
+      ],
+      "diff": "--- original\n+++ neighbor\n@@ -1,15 +1 @@\n-Sure, here's a simple example of a folk tune written in ABC notation:\n-\n-```\n-X:1\n-T:Simple Folk Tune\n-M:4/4\n-L:1/4\n-K:C\n-C2 E2 | G2 E2 | F2 D2 | C4 |\n-G2 A2 | B2 A2 | G2 E2 | D4 |\n-C2 E2 | G2 E2 | F2 D2 | C4 |\n-G2 A2 | B2 A2 | G2 E2 | D4 |\n-```\n-\n-This is a very basic melody in the key of C major. The rhythm is quite straightforward, with each bar containing four quarter notes (crotchets). The melody moves up and down the scale in a way that is typical of many folk tunes.\n+Sure, here's A simple example of a folk tune written in ABC notation: ``` X:1 T:Simple Folk Tune M:4/4 L:1/4 K:C C2 E2 | G2 E2 | F2 D2 | C4 | G2 A2 | B2 A2 | G2 E2 | D4 | C2 E2 | G2 E2 | F2 D2 | C4 | G2 A2 | B2 A2 | G2 E2 | D4 | ``` This is a very basic melody IN THE key of C major. The rhythm is quite straightforward, with each bar containing four quarter notes (crotchets). the melody moves up and down THE scale IN a way that is typical of many folk tunes.",
+      "original_judgment": {
+        "pairwise": "A>>B",
+        "score": 1.0
+      },
+      "neighbor_judgments": [
+        {
           "pairwise": "A>>B",
           "score": 1.0
+        }
+      ]
+    },
+    {
+      "question_id": "328c149ed45a41c0b9d6f14659e63599",
+      "model": "gpt-4-0613",
+      "changed_field": "answer_a",
+      "original_response": "X:1\nT:Untitled Folk Tune\nM:4/4\nL:1/8\nK:G\n|:G2A2|B2A2|G2E2|D4|E2F2|G2F2|E2C2|B,4|\nA2B2|c2B2|A2F2|E4|D2E2|F2E2|D2B,2|C4:|",
+      "neighbors": [
+        "X:1 T:Untitled   Folk Tune M:4/4 L:1/8 K:G |:G2A2|B2A2|G2E2|D4|E2F2|G2F2|E2C2|B,4| A2B2|c2B2|A2F2|E4|D2E2|F2E2|D2B,2|C4:|"
+      ],
+      "diff": "--- original\n+++ neighbor\n@@ -1,7 +1 @@\n-X:1\n-T:Untitled Folk Tune\n-M:4/4\n-L:1/8\n-K:G\n-|:G2A2|B2A2|G2E2|D4|E2F2|G2F2|E2C2|B,4|\n-A2B2|c2B2|A2F2|E4|D2E2|F2E2|D2B,2|C4:|\n+X:1 T:Untitled   Folk Tune M:4/4 L:1/8 K:G |:G2A2|B2A2|G2E2|D4|E2F2|G2F2|E2C2|B,4| A2B2|c2B2|A2F2|E4|D2E2|F2E2|D2B,2|C4:|",
+      "original_judgment": {
+        "pairwise": "A>>B",
+        "score": 1.0
+      },
+      "neighbor_judgments": [
+        {
+          "pairwise": "A>B",
+          "score": 2.0
         }
       ]
     }
