@@ -217,11 +217,22 @@ class ABBSensitivity(SensitivityEstimator):
             self._original_judgments = np.asarray(self.judge_function(self._sampled_original_context))
         else:
             self._original_judgments = np.asarray(self.judge_function(context))
+        # Baseline scoring summary
+        try:
+            bs = getattr(self.judge_function, 'interface', None)
+            batch_size = getattr(bs, 'batch_size', None) if bs else None
+            if batch_size:
+                print(f"📊 Baseline scoring complete: {len(self._original_judgments)} samples (batch_size={batch_size})")
+            else:
+                print(f"📊 Baseline scoring complete: {len(self._original_judgments)} samples")
+        except Exception:
+            pass
         
         # Sample neighbor contexts
         # Check if this is a formatting generator and we have Arena-Hard context
         from ..neighbors import FormattingNeighborGenerator
         
+        fast_path = False
         if (isinstance(self.neighbor_generator, FormattingNeighborGenerator) and 
             isinstance(context, pd.DataFrame) and 
             'question_id' in context.columns and 'model' in context.columns):
@@ -247,6 +258,7 @@ class ABBSensitivity(SensitivityEstimator):
             
             # Also store the sampled original context for proper comparison
             self._sampled_original_context = sampled_context
+            fast_path = True
         else:
             # For other generators: Use standard neighbor sampling
             neighbors = self.neighbor_generator.sample_neighbors(context, self.num_neighbors)
@@ -260,9 +272,33 @@ class ABBSensitivity(SensitivityEstimator):
         # Get neighbor type name for better progress description
         neighbor_type = self.neighbor_generator.__class__.__name__.replace('NeighborGenerator', '').lower()
         
-        for neighbor in tqdm(neighbors, desc=f"Computing {neighbor_type} neighbors"):
-            neighbor_judgment = np.asarray(self.judge_function(neighbor))
-            neighbor_judgments.append(neighbor_judgment)
+        if fast_path:
+            print(f"🧪 Neighbor experiments: {len(neighbors)} (single-sample fast path)")
+        else:
+            print(f"🧪 Neighbor experiments: {len(neighbors)}")
+
+        for exp_idx, neighbor in enumerate(tqdm(neighbors, desc=f"Computing {neighbor_type} neighbors")):
+            # Optimization: if this neighbor is a single-sample formatting perturbation experiment,
+            # avoid re-scoring unchanged samples. Only score the perturbed sample and splice it into
+            # the cached original judgments.
+            if (
+                isinstance(neighbor, list)
+                and any(isinstance(ctx, dict) and ctx.get('is_formatting_neighbor', False) for ctx in neighbor)
+                and hasattr(self, '_sampled_original_context')
+                and self._original_judgments is not None
+            ):
+                base = np.asarray(self._original_judgments).flatten().copy()
+                perturbed_ctx = next(ctx for ctx in neighbor if ctx.get('is_formatting_neighbor', False))
+                idx = int(perturbed_ctx.get('perturbed_sample_index', -1))
+                print(f"   ↻ Experiment {exp_idx + 1}/{len(neighbors)}: recomputing only index {idx}")
+                if 0 <= idx < len(base):
+                    new_score_arr = np.asarray(self.judge_function(perturbed_ctx)).flatten()
+                    if new_score_arr.size > 0 and np.isfinite(new_score_arr[0]):
+                        base[idx] = float(new_score_arr[0])
+                neighbor_judgments.append(base)
+            else:
+                neighbor_judgment = np.asarray(self.judge_function(neighbor))
+                neighbor_judgments.append(neighbor_judgment)
         
         self._neighbor_judgments = neighbor_judgments
         self._calculate_rms_sensitivity()

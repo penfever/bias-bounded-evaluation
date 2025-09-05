@@ -75,7 +75,8 @@ class OumiJudgeInterface:
     def __init__(self, 
                  config_path: str,
                  cost_budget_usd: float = 10.0,
-                 cache_responses: bool = True):
+                 cache_responses: bool = True,
+                 prefer_existing_scores: bool = True):
         """
         Initialize Oumi judge interface.
         
@@ -92,6 +93,7 @@ class OumiJudgeInterface:
         self.cost_budget_usd = cost_budget_usd
         self.spent_usd = 0.0
         self.cache_responses = cache_responses
+        self.prefer_existing_scores = prefer_existing_scores
         
         # Load config
         self.config = self._load_oumi_config()
@@ -751,8 +753,11 @@ def create_oumi_judge_function(config_path: str, **kwargs) -> callable:
             # Load actual Arena-Hard-Auto data from base_processed directory
             base_processed_dir = "/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/sos-addl-data/InDepthAnalysis"
             
-            # Build query contexts for batching
+            # Build query contexts for batching and/or harvest precomputed scores
             query_contexts: List[Dict[str, Any]] = []
+            precomputed_scores: List[Optional[float]] = []
+            resolved_mask: List[bool] = []
+            row_records: List[tuple] = []  # keep (question_id, model) for alignment
             for _, row in sampled_context.iterrows():
                 question_id = row['question_id']
                 model_name = row['model']
@@ -760,19 +765,57 @@ def create_oumi_judge_function(config_path: str, **kwargs) -> callable:
                     judgment_data = _load_judgment_data(base_processed_dir, question_id, model_name)
                     user_prompt = judgment_data['games'][0]['user_prompt']
                     question, answer_a, answer_b = _parse_arena_hard_prompt(user_prompt)
-                    query_contexts.append({
-                        'question': question,
-                        'answer_a': answer_a,
-                        'answer_b': answer_b,
-                        'model': model_name
-                    })
+                    row_records.append((question_id, model_name))
+                    # Try to use precomputed baseline score if available and preferred
+                    score_used = None
+                    if self.prefer_existing_scores:
+                        try:
+                            # Heuristic: search for pairwise verdict tokens in record
+                            rec_str = json.dumps(judgment_data, ensure_ascii=False)
+                            for token in ['A>>B', 'B>>A', 'A>B', 'B>A', 'A=B']:
+                                if token in rec_str:
+                                    score_used = PAIRWISE_TO_SCORE.get(token)
+                                    break
+                        except Exception:
+                            score_used = None
+                    if score_used is not None:
+                        precomputed_scores.append(float(score_used))
+                        resolved_mask.append(True)
+                        # placeholder for alignment; no query context for this row
+                        query_contexts.append(None)  # type: ignore
+                    else:
+                        precomputed_scores.append(None)
+                        resolved_mask.append(False)
+                        query_contexts.append({
+                            'question': question,
+                            'answer_a': answer_a,
+                            'answer_b': answer_b,
+                            'model': model_name
+                        })
                 except Exception:
                     # Skip this row if load/parse fails
                     continue
 
-            # Batched infer
-            responses = judge_interface.query_judge_batch(query_contexts)
-            scores = [r['scores']['overall_score'] for r in responses if 'scores' in r and 'overall_score' in r['scores']]
+            # If any unresolved, run batched infer only for those rows
+            scores: List[float] = []
+            if any(not r for r in resolved_mask):
+                to_query = [qc for qc, res in zip(query_contexts, resolved_mask) if not res and qc is not None]
+                responses = judge_interface.query_judge_batch(to_query) if to_query else []
+                queried_scores = [r['scores']['overall_score'] for r in responses if 'scores' in r and 'overall_score' in r['scores']]
+                # Merge back preserving order
+                q_iter = iter(queried_scores)
+                for res, pc in zip(resolved_mask, precomputed_scores):
+                    if res and pc is not None:
+                        scores.append(pc)
+                    else:
+                        try:
+                            scores.append(float(next(q_iter)))
+                        except StopIteration:
+                            # Fallback if mismatch
+                            pass
+            else:
+                # All precomputed
+                scores = [float(pc) for pc in precomputed_scores if pc is not None]
 
             total_attempted = len(query_contexts)
             successful_samples = len(scores)
@@ -780,6 +823,13 @@ def create_oumi_judge_function(config_path: str, **kwargs) -> callable:
                 raise ValueError(f"No valid judgment data found for dynamic scoring in {total_attempted} samples")
 
             result = np.array(scores)
+            # Report precomputed usage
+            try:
+                if self.prefer_existing_scores:
+                    used = sum(1 for pc in precomputed_scores if pc is not None)
+                    print(f"📎 Used precomputed baseline scores for {used}/{successful_samples} samples")
+            except Exception:
+                pass
             
             # Debug: Check for suspicious score patterns that could indicate fallback issues
             if len(scores) > 5:  # Only analyze if we have enough samples
