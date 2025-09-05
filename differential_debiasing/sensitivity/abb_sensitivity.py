@@ -211,12 +211,14 @@ class ABBSensitivity(SensitivityEstimator):
         Fit using provided judge function to evaluate original context and neighbors.
         """
         # Compute original judgment
-        # For formatting sensitivity with sampling, use the sampled context
-        if hasattr(self, '_sampled_original_context'):
-            print(f"🔧 Computing original judgments for {len(self._sampled_original_context)} sampled rows")
-            self._original_judgments = np.asarray(self.judge_function(self._sampled_original_context))
-        else:
-            self._original_judgments = np.asarray(self.judge_function(context))
+        # For formatting sensitivity with sampling, use the judge's last used context if available
+        self._original_judgments = np.asarray(self.judge_function(context))
+        if hasattr(self.judge_function, '_last_context_used_df'):
+            try:
+                self._sampled_original_context = getattr(self.judge_function, '_last_context_used_df')
+                print(f"🔧 Using judge-selected baseline context: {len(self._sampled_original_context)} rows")
+            except Exception:
+                pass
         # Baseline scoring summary
         try:
             bs = getattr(self.judge_function, 'interface', None)
@@ -243,29 +245,26 @@ class ABBSensitivity(SensitivityEstimator):
                 print(f"🔧 Using efficient Arena-Hard formatting sensitivity (sample-based)")
                 self._formatting_logged = True
             
-            # Sample a subset for efficient formatting sensitivity measurement
-            sample_size = min(self.target_samples, len(context))
-            print(f"🔧 Sampling {sample_size} from {len(context)} total (target_samples={self.target_samples})")
-            sampled_indices = np.random.choice(len(context), size=sample_size, replace=False)
-            sampled_context = context.iloc[sampled_indices].copy()
-            
-            # Determine base_processed directory from sampled context
-            if 'source_dir' in sampled_context.columns:
-                # Expect all sampled rows to share the same base_processed directory
-                dirs = sampled_context['source_dir'].unique().tolist()
+            # Use the judge-selected baseline context to ensure index alignment
+            if not hasattr(self, '_sampled_original_context') or self._sampled_original_context is None:
+                raise ValueError("Baseline context not available; cannot generate aligned neighbors")
+            baseline_df = self._sampled_original_context
+            sample_size = len(baseline_df)
+            print(f"📊 Using all {sample_size} samples for dynamic scoring")
+
+            # Determine base_processed directory from baseline context
+            if 'source_dir' in baseline_df.columns:
+                dirs = baseline_df['source_dir'].unique().tolist()
                 if len(dirs) > 1:
                     print(f"⚠️ Multiple source_dir values found; using the first one: {dirs[0]}")
                 base_processed_dir = dirs[0]
             else:
-                raise ValueError("sampled_context must include 'source_dir' column pointing to base_processed directory")
-            
+                raise ValueError("baseline context must include 'source_dir' column pointing to base_processed directory")
+
             # Create all neighbors at once with different random perturbations
             neighbors = self.neighbor_generator.create_efficient_arena_hard_neighbors(
-                sampled_context, base_processed_dir, self.num_neighbors
+                baseline_df, base_processed_dir, self.num_neighbors
             )
-            
-            # Also store the sampled original context for proper comparison
-            self._sampled_original_context = sampled_context
             fast_path = True
         else:
             # For other generators: Use standard neighbor sampling
@@ -303,10 +302,19 @@ class ABBSensitivity(SensitivityEstimator):
                     new_score_arr = np.asarray(self.judge_function(perturbed_ctx)).flatten()
                     if new_score_arr.size > 0 and np.isfinite(new_score_arr[0]):
                         base[idx] = float(new_score_arr[0])
-                neighbor_judgments.append(base)
+                        neighbor_judgments.append(base)
+                    else:
+                        print("     ⚠️ Skipping neighbor: unparseable or missing score for perturbed sample")
+                        continue
+                else:
+                    print("     ⚠️ Skipping neighbor: invalid perturbed index")
+                    continue
             else:
-                neighbor_judgment = np.asarray(self.judge_function(neighbor))
-                neighbor_judgments.append(neighbor_judgment)
+                neighbor_judgment = np.asarray(self.judge_function(neighbor)).flatten()
+                if neighbor_judgment.size > 0 and np.all(np.isfinite(neighbor_judgment)):
+                    neighbor_judgments.append(neighbor_judgment)
+                else:
+                    print("     ⚠️ Skipping neighbor: empty or non-finite judgment vector")
         
         self._neighbor_judgments = neighbor_judgments
         self._calculate_rms_sensitivity()

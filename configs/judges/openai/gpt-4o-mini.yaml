@@ -1,7 +1,8 @@
 engine: OPENAI
 generation:
   max_new_tokens: 4096
-  temperature: 0.1
+  temperature: 0.01
+  top_p: 0.01
 model:
   model_name: gpt-4o-mini-2024-07-18
 batch_size: 16

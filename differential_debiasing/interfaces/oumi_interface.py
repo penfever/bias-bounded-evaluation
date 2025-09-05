@@ -240,9 +240,13 @@ class OumiJudgeInterface:
         else:
             response = self._query_with_oumi(prompt)
         
-        # Parse scores
-        scores = self._parse_judge_response(response['raw_output'])
-        response['scores'] = scores
+        # Parse scores (hardened: capture unparseable responses)
+        try:
+            scores = self._parse_judge_response(response['raw_output'])
+            response['scores'] = scores
+        except Exception as e:
+            # Do not raise; mark as parse error so caller can skip
+            response['parse_error'] = str(e)
         
         # Update cost tracking
         if 'token_count' in response and self._cost_per_token > 0:
@@ -442,7 +446,10 @@ class OumiJudgeInterface:
                     'token_count': len(out_text.split()) if isinstance(out_text, str) else 0,
                     'api_type': 'oumi_direct'
                 }
-                parsed['scores'] = self._parse_judge_response(parsed['raw_output'])
+                try:
+                    parsed['scores'] = self._parse_judge_response(parsed['raw_output'])
+                except Exception as e:
+                    parsed['parse_error'] = str(e)
 
                 # Cost tracking per item
                 if 'token_count' in parsed and self._cost_per_token > 0:
@@ -466,10 +473,9 @@ class OumiJudgeInterface:
         question = context.get('question', '')
         answer_a = context.get('answer', context.get('answer_a', ''))
         answer_b = context.get('answer_b', answer_a)
+        # If a separate neighbor answer is provided, use it; otherwise keep A and B as provided
         if answer_a == answer_b and 'neighbor_answer' in context:
             answer_b = context['neighbor_answer']
-        elif answer_a == answer_b:
-            answer_b = answer_a + "\n\n[This response has been slightly modified for comparison purposes.]"
         return build_pairwise_judge_prompt(question, answer_a, answer_b)
     
     def _parse_judge_response(self, response: str) -> Dict[str, float]:
@@ -641,6 +647,7 @@ def create_oumi_judge_function(config_path: str, arena_base_dir: Optional[str] =
             precomputed_scores: List[Optional[float]] = []
             resolved_mask: List[bool] = []
             row_records: List[tuple] = []  # keep (question_id, model) for alignment
+            row_indices: List[int] = []    # index in sampled_context for reconstruction
             loaded_ok = 0
             precomputed_ok = 0
             queued_for_query = 0
@@ -664,6 +671,7 @@ def create_oumi_judge_function(config_path: str, arena_base_dir: Optional[str] =
                     judgment_data = _load_judgment_data(base_dir_for_row, question_id, model_name)
                     loaded_ok += 1
                     row_records.append((question_id, model_name))
+                    row_indices.append(ridx)
                     # Try to use precomputed baseline score if available and preferred
                     score_used = None
                     if judge_interface.prefer_existing_scores:
@@ -711,24 +719,31 @@ def create_oumi_judge_function(config_path: str, arena_base_dir: Optional[str] =
 
             # If any unresolved, run batched infer only for those rows
             scores: List[float] = []
+            kept_indices: List[int] = []
             if any(not r for r in resolved_mask):
                 to_query = [qc for qc, res in zip(query_contexts, resolved_mask) if not res and qc is not None]
                 responses = judge_interface.query_judge_batch(to_query) if to_query else []
                 queried_scores = [r['scores']['overall_score'] for r in responses if 'scores' in r and 'overall_score' in r['scores']]
                 # Merge back preserving order
                 q_iter = iter(queried_scores)
-                for res, pc in zip(resolved_mask, precomputed_scores):
+                for pos, (res, pc) in enumerate(zip(resolved_mask, precomputed_scores)):
                     if res and pc is not None:
                         scores.append(pc)
+                        kept_indices.append(row_indices[pos])
                     else:
                         try:
-                            scores.append(float(next(q_iter)))
+                            val = float(next(q_iter))
+                            scores.append(val)
+                            kept_indices.append(row_indices[pos])
                         except StopIteration:
-                            # Fallback if mismatch
-                            pass
+                            # Missing parsed score for this row; skip this sample
+                            continue
             else:
                 # All precomputed
-                scores = [float(pc) for pc in precomputed_scores if pc is not None]
+                for pos, pc in enumerate(precomputed_scores):
+                    if pc is not None:
+                        scores.append(float(pc))
+                        kept_indices.append(row_indices[pos])
 
             total_attempted = len(resolved_mask)
             print(f"📋 Baseline path: loaded={loaded_ok}, precomputed={precomputed_ok}, queued={queued_for_query}, skipped={skipped_rows}")
@@ -756,20 +771,39 @@ def create_oumi_judge_function(config_path: str, arena_base_dir: Optional[str] =
                 if fallback_dominant:
                     print(f"⚠️  Warning: Score distribution may indicate fallback dominance: {dict(zip(unique_scores, counts))}")
             
+            # Expose the actual baseline DataFrame used to allow downstream alignment
+            try:
+                judge_function._last_context_used_df = sampled_context.iloc[kept_indices].copy()
+            except Exception:
+                pass
             return result
             
         elif isinstance(context, dict):
             # For single context dict (usually used in testing)
             response = judge_interface.query_judge(context)
-            score = response['scores']['overall_score']
-            result = np.array([score])
-            return result
+            if 'scores' in response and 'overall_score' in response['scores']:
+                score = response['scores']['overall_score']
+                result = np.array([score])
+                return result
+            else:
+                # Unparseable or invalid; return empty array to signal skip to caller
+                note = response.get('parse_error', 'no-score')
+                print(f"   ⚠️ Skipping unparseable single context: {note}")
+                return np.array([])
             
         elif isinstance(context, list):
             # Handle list of contexts (e.g., formatting neighbors)
             # Batched infer over list of contexts
             responses = judge_interface.query_judge_batch(context)
-            scores = [r['scores']['overall_score'] for r in responses if 'scores' in r and 'overall_score' in r['scores']]
+            scores = []
+            skipped = 0
+            for r in responses:
+                if 'scores' in r and 'overall_score' in r['scores']:
+                    scores.append(r['scores']['overall_score'])
+                else:
+                    skipped += 1
+            if skipped:
+                print(f"   ⚠️ Skipped {skipped} unparseable neighbor contexts in batch")
             if not scores:
                 raise ValueError("No valid contexts could be evaluated")
             result = np.array(scores)

@@ -243,6 +243,7 @@ class FormattingNeighborGenerator(BaseNeighborGenerator):
                  text_fields: Optional[List[str]] = None,
                  formatting_types: Optional[List[str]] = None,
                  single_field: bool = True,
+                 disable_transforms: bool = False,
                  **kwargs):
         """
         Initialize formatting neighbor generator.
@@ -263,6 +264,7 @@ class FormattingNeighborGenerator(BaseNeighborGenerator):
         self.text_fields = text_fields if text_fields is not None else ['answer_a', 'answer_b']
         # Default to minimal, formatting-only perturbations
         self.formatting_types = formatting_types or ['whitespace', 'capitalization', 'punctuation']
+        self.disable_transforms = disable_transforms
         self.single_field = single_field
     
     def sample_neighbors(self, context: Union[Dict, pd.DataFrame], num_neighbors: int) -> List[Union[Dict, pd.DataFrame]]:
@@ -364,6 +366,8 @@ class FormattingNeighborGenerator(BaseNeighborGenerator):
     
     def _apply_formatting_changes(self, text: str) -> str:
         """Apply random formatting changes to text."""
+        if getattr(self, 'disable_transforms', False):
+            return text
         modified_text = text
         
         # Choose random formatting type to apply

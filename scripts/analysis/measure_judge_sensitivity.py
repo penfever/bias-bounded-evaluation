@@ -62,7 +62,9 @@ def measure_formatting_sensitivity(judge_name: str,
                                  sample_data: pd.DataFrame,
                                  num_neighbors: int = 40,
                                  target_samples: int = 20,
-                                 cost_budget_usd: float = 10.0) -> Dict[str, Any]:
+                                 cost_budget_usd: float = 10.0,
+                                 prefer_existing_scores: bool = False,
+                                 disable_transforms: bool = False) -> Dict[str, Any]:
     """
     Measure formatting sensitivity for a specific judge.
     
@@ -91,7 +93,9 @@ def measure_formatting_sensitivity(judge_name: str,
         judge_function = create_oumi_judge_function(
             str(judge_config_path),
             cost_budget_usd=cost_budget_usd,
-            cache_responses=True
+            cache_responses=True,
+            # Control reuse of cached baseline scores via CLI flag
+            prefer_existing_scores=prefer_existing_scores
         )
         print(f"✅ Created judge function for {judge_name}")
         
@@ -104,6 +108,7 @@ def measure_formatting_sensitivity(judge_name: str,
             text_fields=['answer_a', 'answer_b'],
             formatting_types=['whitespace', 'capitalization', 'punctuation'],
             single_field=True,
+            disable_transforms=disable_transforms,
             random_seed=42
         )
         
@@ -339,6 +344,10 @@ def main():
                         help="Cost budget in USD for API calls")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would be measured without actually running")
+    parser.add_argument("--reuse-baseline", action="store_true",
+                        help="Reuse precomputed Arena-Hard baseline judgments instead of recomputing")
+    parser.add_argument("--disable-transforms", action="store_true",
+                        help="Disable all formatting transforms (neighbors identical to baseline)")
     
     args = parser.parse_args()
     
@@ -350,6 +359,8 @@ def main():
     print(f"Samples: {args.samples}")
     print(f"Neighbors: {args.neighbors}")
     print(f"Budget: ${args.budget}")
+    print(f"Reuse baseline: {'Yes' if args.reuse_baseline else 'No'}")
+    print(f"Disable transforms: {'Yes' if args.disable_transforms else 'No'}")
     
     if args.dry_run:
         print("\n🧪 DRY RUN MODE - No measurements will be performed")
@@ -388,7 +399,9 @@ def main():
             sample_data=sample_data,
             num_neighbors=args.neighbors,
             target_samples=args.samples,
-            cost_budget_usd=args.budget
+            cost_budget_usd=args.budget,
+            prefer_existing_scores=args.reuse_baseline,
+            disable_transforms=args.disable_transforms
         )
         
         # Compute Hamming-1 sensitivity using baseline scores only (no extra judge calls)

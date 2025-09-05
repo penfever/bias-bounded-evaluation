@@ -1,8 +1,8 @@
 engine: LLAMACPP
 generation:
   max_new_tokens: 2048
-  temperature: 0.0
-  top_p: 0.9
+  temperature: 0.01
+  top_p: 0.01
 model:
   model_kwargs:
     filename: QwQ-32B-UD-Q4_K_XL.gguf

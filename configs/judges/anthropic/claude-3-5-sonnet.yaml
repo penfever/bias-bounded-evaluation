@@ -1,7 +1,8 @@
 engine: ANTHROPIC
 generation:
   max_new_tokens: 2048
-  temperature: 0.0
+  temperature: 0.01
+  top_p: 0.01
 model:
   model_name: claude-3-5-sonnet-latest
 batch_size: 16

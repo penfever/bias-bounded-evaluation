@@ -206,74 +206,7 @@ def load_and_prepare_score_data(judge_name: str, base_path: Path) -> pd.DataFram
     
     return scores_df
 
-def create_synthetic_judge_function():
-    """Create a synthetic judge function for Combined A-BB dynamic measurements."""
-    
-    def synthetic_judge(context):
-        """
-        Synthetic judge that exhibits bias patterns for demonstration.
-        
-        This judge has:
-        1. Length bias - prefers certain score ranges
-        2. Model name bias - influenced by model identifiers  
-        3. Factor interaction bias - non-linear factor combinations
-        """
-        base_score = 6.0
-        bias_total = 0.0
-        
-        # Handle different context types
-        if isinstance(context, dict):
-            # Model name bias
-            if 'model_id' in context:
-                model_id = str(context['model_id'])
-                if 'gpt' in model_id.lower():
-                    bias_total += 0.5
-                elif 'claude' in model_id.lower():
-                    bias_total += 0.3
-                elif any(x in model_id for x in ['1', '3', '5']):  # Odd numbers
-                    bias_total += 0.2
-            
-            # Use existing overall score if available
-            if 'overall_score' in context:
-                base_score = float(context['overall_score'])
-                
-                # Range bias - penalize very high or very low scores
-                if base_score > 8.5:
-                    bias_total -= 0.4
-                elif base_score < 3.0:
-                    bias_total += 0.6
-            
-            # Factor interaction bias
-            if 'correctness_score' in context and 'clarity_score' in context:
-                correctness = float(context['correctness_score'])
-                clarity = float(context['clarity_score'])
-                
-                # Bias toward high correctness + clarity combination
-                if correctness > 7 and clarity > 7:
-                    bias_total += 0.4
-                elif correctness < 4 or clarity < 4:
-                    bias_total -= 0.3
-                    
-        elif isinstance(context, pd.DataFrame):
-            # For DataFrame, use first row
-            if not context.empty:
-                first_row = context.iloc[0]
-                if 'overall_score' in context.columns:
-                    base_score = float(first_row['overall_score'])
-                
-                # Apply model bias
-                if 'model_id' in context.columns:
-                    model_id = str(first_row['model_id'])
-                    if any(x in model_id for x in ['1', '3', '5']):
-                        bias_total += 0.2
-        
-        # Add random noise
-        noise = np.random.normal(0, 0.3)
-        
-        final_score = base_score + bias_total + noise
-        return np.clip(final_score, 1.0, 10.0)
-    
-    return synthetic_judge
+## Synthetic judge removed: script now exclusively uses real judges via Oumi
 
 def check_sensitivity_profiles(real_judge_name: str) -> Dict[str, Any]:
     """
@@ -316,41 +249,26 @@ def check_sensitivity_profiles(real_judge_name: str) -> Dict[str, Any]:
 
 
 def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str, 
-                              real_judge_name: Optional[str] = None,
-                              use_real_judge: bool = True) -> Dict[str, Any]:
+                              real_judge_name: str) -> Dict[str, Any]:
     """Run Combined A-BB debiasing approaches on the judge data."""
     print(f"\nRunning Combined A-BB analysis for {judge_name}...")
     
     config_manager = ConfigManager()
     
-    # Check for sensitivity profiles if using real judge
-    profile_info = None
-    if use_real_judge and real_judge_name:
-        profile_info = check_sensitivity_profiles(real_judge_name)
+    # Check for sensitivity profiles for the real judge
+    profile_info = check_sensitivity_profiles(real_judge_name)
     
-    # Create judge function - either real or synthetic
-    if use_real_judge and real_judge_name:
-        print(f"Attempting to use real judge: {real_judge_name}")
-        # Create real judge function using Oumi interface with cost management
-        judge_config_path = get_judge_config_path(real_judge_name)
-        if judge_config_path.exists():
-            try:
-                judge_function = create_oumi_judge_function(
-                    str(judge_config_path),
-                    cost_budget_usd=5.0,  # Conservative budget for testing
-                    cache_responses=True
-                )
-                print(f"✅ Successfully created {real_judge_name} judge function")
-            except Exception as e:
-                print(f"⚠️ Failed to create real judge function: {e}")
-                print("Falling back to synthetic judge")
-                judge_function = create_synthetic_judge_function()
-        else:
-            print(f"Warning: Judge config not found at {judge_config_path}, using synthetic judge")
-            judge_function = create_synthetic_judge_function()
-    else:
-        print("Using synthetic judge function")
-        judge_function = create_synthetic_judge_function()
+    # Create real judge function using Oumi interface with cost management
+    print(f"Attempting to use real judge: {real_judge_name}")
+    judge_config_path = get_judge_config_path(real_judge_name)
+    if not judge_config_path.exists():
+        raise FileNotFoundError(f"Judge config not found at {judge_config_path}")
+    judge_function = create_oumi_judge_function(
+        str(judge_config_path),
+        cost_budget_usd=5.0,  # Conservative budget for testing
+        cache_responses=True
+    )
+    print(f"✅ Successfully created {real_judge_name} judge function")
     
     # Determine dynamic generators based on profile availability
     # If we have formatting sensitivity profile, skip expensive formatting measurement
@@ -358,8 +276,8 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
         dynamic_generators = ['hamming']  # Only use fast hamming, skip slow formatting
         print(f"🚀 Using sensitivity profile - skipping expensive formatting measurement")
     else:
-        dynamic_generators = ['hamming', 'formatting']  # Use both (original behavior)
-        print(f"📏 No profile available - will measure both hamming and formatting dynamically")
+        dynamic_generators = ['hamming', 'formatting']  # Use both
+        print(f"📏 No profile available - will measure hamming and formatting dynamically")
 
     # Define Combined A-BB approaches with different aggregation strategies  
     # Using relaxed tau/delta for conservative strategy to help with constraint satisfaction
@@ -563,13 +481,10 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
     
     return results
 
-def main():
+def main(args):
     """Main execution function."""
     print("🚀 Running Combined A-BB Debiasing Analysis")
     print("=" * 60)
-    
-    # Configuration
-    USE_REAL_JUDGE = True  # Set to False for synthetic judge
     
     # Map judge datasets to appropriate judge models
     JUDGE_MAPPING = {
@@ -581,15 +496,8 @@ def main():
         "GPT-4o-mini-0718-setting1": "gpt-4o-mini",
     }
     
-    
-    if USE_REAL_JUDGE:
-        print(f"⚠️  REAL JUDGE MODE: Will query appropriate judges via Oumi")
-        print(f"⚠️  This will incur API costs for cloud models and require GGUF files for local models!")
-    else:
-        print("Using synthetic judge function (no API costs)")
-    
-    # Base path for score data
-    base_path = Path("/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/sos-addl-data/InDepthAnalysis")
+    # Base path for score data (from CLI)
+    base_path = Path(args.data_path)
     
     if not base_path.exists():
         print(f"Error: Base path does not exist: {base_path}")
@@ -626,9 +534,7 @@ def main():
             
             # Run Combined A-BB analysis
             analysis_results = run_combined_abb_analysis(
-                df, judge_name, 
-                real_judge_name=judge_to_use if USE_REAL_JUDGE else None,
-                use_real_judge=USE_REAL_JUDGE
+                df, judge_name, real_judge_name=judge_to_use
             )
             
             # Store results
@@ -684,6 +590,8 @@ def main():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Combined A-BB Debiasing Analysis")
+    parser.add_argument("--data-path", "-d", type=str, required=True,
+                        help="Base path to Arena-Hard evaluation data (judge folders with base_processed)")
     parser.add_argument("--test", action="store_true", 
                         help="Run in test mode with limited samples (fast for debugging)")
     parser.add_argument("--test-samples", type=int, default=5,
@@ -697,5 +605,5 @@ if __name__ == "__main__":
         os.environ['TEST_MODE'] = 'true'
         os.environ['TEST_SAMPLES'] = str(args.test_samples)
     
-    exit_code = main()
+    exit_code = main(args)
     exit(exit_code)

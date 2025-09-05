@@ -1,8 +1,8 @@
 engine: LLAMACPP
 generation:
   max_new_tokens: 2048
-  temperature: 0.0
-  top_p: 0.9
+  temperature: 0.01
+  top_p: 0.01
 model:
   model_kwargs:
     filename: DeepSeek-R1-Distill-Qwen-32B-Q4_K_M.gguf
