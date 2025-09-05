@@ -8,6 +8,7 @@ improving performance and flexibility.
 """
 
 import sys
+import difflib
 import os
 import json
 import pandas as pd
@@ -211,11 +212,44 @@ def measure_formatting_sensitivity(judge_name: str,
                     orig_score = float(np.asarray(original_scores).flatten()[idx])
                     neigh_score = float(np.asarray(exp_scores).flatten()[idx])
                     # Build sample entry
+                    # Determine which field actually changed and diff that field
+                    original_a = perturbed_ctx.get('original_answer_a', '') or ''
+                    original_b = perturbed_ctx.get('original_answer_b', '') or ''
+                    original_q = perturbed_ctx.get('original_question', '') or ''
+                    pert_a = perturbed_ctx.get('answer_a', '') or ''
+                    pert_b = perturbed_ctx.get('answer_b', '') or ''
+                    pert_q = perturbed_ctx.get('question', '') or ''
+
+                    if pert_a != original_a:
+                        changed_field = 'answer_a'
+                        original_text = original_a
+                        neighbor_text = pert_a
+                    elif pert_b != original_b:
+                        changed_field = 'answer_b'
+                        original_text = original_b
+                        neighbor_text = pert_b
+                    elif pert_q != original_q:
+                        changed_field = 'question'
+                        original_text = original_q
+                        neighbor_text = pert_q
+                    else:
+                        changed_field = 'unknown'
+                        original_text = original_a
+                        neighbor_text = pert_a
+                    diff_lines = list(difflib.unified_diff(
+                        original_text.splitlines(),
+                        neighbor_text.splitlines(),
+                        fromfile='original', tofile='neighbor', lineterm=''
+                    ))
+                    diff_text = "\n".join(diff_lines)
+
                     entry = {
                         'question_id': perturbed_ctx.get('question_id'),
                         'model': perturbed_ctx.get('model'),
-                        'original_response': perturbed_ctx.get('original_answer_a', ''),
-                        'neighbors': [perturbed_ctx.get('answer_a', '')],
+                        'changed_field': changed_field,
+                        'original_response': original_text,
+                        'neighbors': [neighbor_text],
+                        'diff': diff_text,
                         'original_judgment': {
                             'pairwise': SCORE_TO_PAIRWISE.get(orig_score),
                             'score': orig_score
