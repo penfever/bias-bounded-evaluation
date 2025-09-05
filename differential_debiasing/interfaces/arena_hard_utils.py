@@ -9,7 +9,7 @@ Utilities for working with Arena-Hard(-Auto) data:
 from __future__ import annotations
 
 import re
-from typing import Optional, Tuple, Dict, Any, Iterable, Union
+from typing import Optional, Tuple, Dict, Any, Iterable, Union, List
 from pathlib import Path
 
 # Canonical mapping from pairwise tokens to numeric scores
@@ -203,3 +203,90 @@ def load_judgment_data(base_dir: Union[str, Path], question_id: str, model_name:
     raise FileNotFoundError(
         f"Could not find judgment data for question_id={question_id}, model={model_name} under {base_dir}"
     )
+
+
+def setting_dir_for_judge(judge_name: str) -> Optional[str]:
+    """Return expected InDepthAnalysis setting directory for a given judge name.
+
+    Returns None if no explicit mapping is known.
+    """
+    j = judge_name.strip().lower()
+    mapping = {
+        'gpt-4o-mini': 'GPT-4o-mini-0718-setting1',
+        'gpt-3.5-turbo': 'GPT-3.5-Turbo-0125-setting1',
+        'deepseek-r1-32b': 'DeepSeek-R1-32B-setting1',
+        'deepseek-r1-32b-gguf': 'DeepSeek-R1-32B-setting1',
+        'qwq-32b': 'QwQ-32B-setting1',
+        'qwq-32b-gguf': 'QwQ-32B-setting1',
+    }
+    return mapping.get(j)
+
+
+def find_sample_data(base_path: Union[str, Path], judge_name: str, max_samples: int = 50):
+    """Find sample evaluation data rows for sensitivity measurement.
+
+    Returns a pandas DataFrame with columns: question_id, model, source_dir.
+    """
+    import json
+    import pandas as pd
+
+    base_path = Path(base_path)
+    print(f"🔍 Searching for sample data in {base_path}...")
+
+    expected = setting_dir_for_judge(judge_name)
+    sample_rows: List[Dict[str, Any]] = []
+
+    candidate_dirs: List[Path] = []
+    if expected:
+        cand = base_path / expected
+        if cand.exists() and cand.is_dir():
+            candidate_dirs = [cand]
+        else:
+            print(f"  ⚠️ Expected data source '{expected}' not found under {base_path}. Falling back to scan.")
+    if not candidate_dirs:
+        candidate_dirs = [d for d in base_path.glob("*-setting*") if d.is_dir()]
+
+    for setting_dir in candidate_dirs:
+        base_processed_dir = setting_dir / "base_processed"
+        if not base_processed_dir.exists():
+            continue
+        print(f"  Found data source: {setting_dir.name}")
+
+        # Load up to ~max_samples across up to 3 model files
+        for jsonl_file in list(base_processed_dir.glob("*.jsonl"))[:3]:
+            model_name = jsonl_file.stem
+            try:
+                with open(jsonl_file, 'r', encoding='utf-8') as f:
+                    count = 0
+                    for line in f:
+                        if count >= max_samples // 3:
+                            break
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                        except Exception:
+                            continue
+                        qid = obj.get('question_id')
+                        if not qid:
+                            continue
+                        sample_rows.append({
+                            'question_id': qid,
+                            'model': model_name,
+                            'source_dir': str(base_processed_dir)
+                        })
+                        count += 1
+            except Exception as e:
+                print(f"    ⚠️ Error reading {jsonl_file}: {e}")
+                continue
+
+        if sample_rows:
+            break
+
+    if not sample_rows:
+        raise ValueError(f"No evaluation data found in {base_path}")
+
+    df = pd.DataFrame(sample_rows)
+    print(f"✅ Found {len(df)} sample evaluations across {df['model'].nunique()} models")
+    return df

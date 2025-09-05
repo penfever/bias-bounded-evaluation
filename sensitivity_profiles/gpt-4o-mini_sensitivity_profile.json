@@ -1,47 +1,47 @@
 {
   "judge_name": "gpt-4o-mini",
   "profile_version": "1.0",
-  "created_date": "2025-09-05T14:24:48.085018+00:00",
+  "created_date": "2025-09-05T14:33:56.755903+00:00",
   "formatting_sensitivity": {
-    "value": 1.5491933384829668,
+    "value": 1.2649110640673518,
     "confidence_interval": [
-      0.8158284906752743,
-      2.282558186290659
+      0.6576272753820288,
+      1.8721948527526746
     ],
     "samples_used": 20,
     "neighbors_generated": 10,
-    "measurement_date": "2025-09-05T14:24:48.084769+00:00",
+    "measurement_date": "2025-09-05T14:33:56.755580+00:00",
     "neighbor_differences": [
-      0.0,
       2.0,
-      1.0,
       0.0,
       0.0,
-      1.0,
       3.0,
+      1.0,
       0.0,
+      1.0,
+      1.0,
       0.0,
-      3.0
+      0.0
     ],
-    "mean_neighbor_difference": 1.0,
-    "std_neighbor_difference": 1.1832159566199232,
+    "mean_neighbor_difference": 0.8,
+    "std_neighbor_difference": 0.9797958971132713,
     "cost_info": {
       "config_path": "/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/bias-bounded-evaluation/configs/judges/openai/gpt-4o-mini.yaml",
       "engine": "OPENAI",
       "model_name": "gpt-4o-mini-2024-07-18",
-      "spent_usd": 0.053040000000000004,
+      "spent_usd": 0.05333,
       "budget_usd": 10.0,
-      "budget_remaining": 9.94696,
+      "budget_remaining": 9.94667,
       "queries_cached": 11
     },
     "diagnostics": {
       "method": "ABBSensitivity",
       "fitted": true,
-      "bias_sensitivity": 1.5491933384829668,
+      "bias_sensitivity": 1.2649110640673518,
       "params": {
         "random_seed": 42
       },
-      "rms_sensitivity": 1.5491933384829668,
+      "rms_sensitivity": 1.2649110640673518,
       "num_neighbors": 10,
       "actual_neighbors_sampled": 10,
       "neighbor_generator": {
@@ -51,19 +51,19 @@
         "description": "Formatting variations: whitespace, capitalization, punctuation"
       },
       "neighbor_differences": [
-        0.0,
         2.0,
-        1.0,
         0.0,
         0.0,
-        1.0,
         3.0,
+        1.0,
         0.0,
+        1.0,
+        1.0,
         0.0,
-        3.0
+        0.0
       ],
-      "mean_neighbor_difference": 1.0,
-      "std_neighbor_difference": 1.1832159566199232,
+      "mean_neighbor_difference": 0.8,
+      "std_neighbor_difference": 0.9797958971132713,
       "max_neighbor_difference": 3.0,
       "original_judgment_shape": [
         20

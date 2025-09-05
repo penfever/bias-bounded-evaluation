@@ -27,6 +27,7 @@ from differential_debiasing.core.config import ConfigManager
 from differential_debiasing.interfaces.oumi_interface import create_oumi_judge_function
 from differential_debiasing.sensitivity.abb_sensitivity import ABBSensitivity
 from differential_debiasing.neighbors import FormattingNeighborGenerator
+from differential_debiasing.interfaces.arena_hard_utils import find_sample_data as find_arena_sample_data
 
 
 def get_judge_config_path(judge_name: str) -> Path:
@@ -54,70 +55,7 @@ def get_judge_config_path(judge_name: str) -> Path:
     raise FileNotFoundError(f"Judge config not found for '{judge_name}'. Expected at one of: {list(judge_mapping.values())}")
 
 
-def find_sample_data(base_path: Path, max_samples: int = 50) -> pd.DataFrame:
-    """
-    Find sample evaluation data for sensitivity measurement.
-    
-    Parameters:
-    -----------
-    base_path : Path
-        Base path to search for evaluation data
-    max_samples : int
-        Maximum number of samples to use for measurement
-        
-    Returns:
-    --------
-    pd.DataFrame : Sample data with question_id, model columns
-    """
-    print(f"🔍 Searching for sample data in {base_path}...")
-    
-    # Look for existing judge directories with base_processed data
-    sample_data = []
-    
-    for judge_dir in base_path.glob("*-setting*"):
-        if judge_dir.is_dir():
-            base_processed_dir = judge_dir / "base_processed"
-            if base_processed_dir.exists():
-                print(f"  Found data source: {judge_dir.name}")
-                
-                # Load a few samples from JSONL files
-                for jsonl_file in list(base_processed_dir.glob("*.jsonl"))[:3]:  # Limit to 3 models
-                    model_name = jsonl_file.stem
-                    
-                    try:
-                        with open(jsonl_file, 'r', encoding='utf-8') as f:
-                            sample_count = 0
-                            for line in f:
-                                if sample_count >= max_samples // 3:  # Distribute samples across models
-                                    break
-                                    
-                                line = line.strip()
-                                if line:
-                                    try:
-                                        data = json.loads(line)
-                                        question_id = data.get('question_id', f'q_{sample_count}')
-                                        sample_data.append({
-                                            'question_id': question_id,
-                                            'model': model_name,
-                                            'source_dir': str(base_processed_dir)
-                                        })
-                                        sample_count += 1
-                                    except json.JSONDecodeError:
-                                        continue
-                    except Exception as e:
-                        print(f"    ⚠️ Error reading {jsonl_file}: {e}")
-                        continue
-                
-                # Break after finding first valid source
-                if sample_data:
-                    break
-    
-    if not sample_data:
-        raise ValueError(f"No evaluation data found in {base_path}")
-    
-    df = pd.DataFrame(sample_data)
-    print(f"✅ Found {len(df)} sample evaluations across {df['model'].nunique()} models")
-    return df
+# (find_sample_data moved to differential_debiasing.interfaces.arena_hard_utils)
 
 
 def measure_formatting_sensitivity(judge_name: str, 
@@ -427,7 +365,7 @@ def main():
     
     try:
         # Find sample data
-        sample_data = find_sample_data(data_path, max_samples=args.samples * 3)
+        sample_data = find_arena_sample_data(data_path, judge_name=args.judge, max_samples=args.samples * 3)
         
         if args.dry_run:
             print(f"\n🧪 Would measure formatting sensitivity for {args.judge}")
