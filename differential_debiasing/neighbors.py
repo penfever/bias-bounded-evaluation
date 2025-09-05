@@ -379,6 +379,18 @@ class FormattingNeighborGenerator(BaseNeighborGenerator):
             modified_text = self._rephrase_text(modified_text)
         
         return modified_text
+
+    def generate_neighbors(self, text: str, num_neighbors: int = 3) -> List[str]:
+        """Generate simple formatting-only neighbors for a raw text string.
+
+        This utility is used primarily for producing illustrative samples in reports.
+        It applies minimal, non-semantic formatting changes (whitespace, capitalization, punctuation)
+        to the provided string and returns a list of perturbed strings.
+        """
+        neighbors: List[str] = []
+        for _ in range(max(0, int(num_neighbors))):
+            neighbors.append(self._apply_formatting_changes(text))
+        return neighbors
     
     def _modify_whitespace(self, text: str) -> str:
         """Apply whitespace modifications."""
@@ -535,20 +547,9 @@ Minimally rephrased version:"""
         
         neighbors = []
         
-        # Import the Arena-Hard data loading functions
-        try:
-            from ..interfaces.oumi_interface import _load_judgment_data, _parse_arena_hard_prompt
-        except ImportError:
-            # Try absolute import
-            try:
-                from differential_debiasing.interfaces.oumi_interface import _load_judgment_data, _parse_arena_hard_prompt
-            except ImportError:
-                # Try direct import from parent directory
-                import sys
-                from pathlib import Path
-                parent_dir = Path(__file__).parent.parent
-                sys.path.insert(0, str(parent_dir))
-                from interfaces.oumi_interface import _load_judgment_data, _parse_arena_hard_prompt
+        # Import Arena-Hard utilities from shared module (single source of truth)
+        from ..interfaces.arena_hard_utils import load_judgment_data as _load_judgment_data
+        from ..interfaces.arena_hard_utils import parse_arena_hard_prompt as _parse_arena_hard_prompt
         
         for _ in range(num_neighbors):
             neighbor_contexts = []
@@ -726,7 +727,10 @@ Minimally rephrased version:"""
                         'question_id': question_id,
                         'neighbor_index': neighbor_idx,
                         'perturbed_sample_index': i,
-                        'is_formatting_neighbor': True
+                        'is_formatting_neighbor': True,
+                        'original_question': original['question'],
+                        'original_answer_a': original['answer_a'],
+                        'original_answer_b': original['answer_b']
                     }
                     neighbor_contexts.append(perturbed_context)
                 else:

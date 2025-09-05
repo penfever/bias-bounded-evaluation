@@ -249,7 +249,15 @@ class ABBSensitivity(SensitivityEstimator):
             sampled_indices = np.random.choice(len(context), size=sample_size, replace=False)
             sampled_context = context.iloc[sampled_indices].copy()
             
-            base_processed_dir = "/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/sos-addl-data/InDepthAnalysis"
+            # Determine base_processed directory from sampled context
+            if 'source_dir' in sampled_context.columns:
+                # Expect all sampled rows to share the same base_processed directory
+                dirs = sampled_context['source_dir'].unique().tolist()
+                if len(dirs) > 1:
+                    print(f"⚠️ Multiple source_dir values found; using the first one: {dirs[0]}")
+                base_processed_dir = dirs[0]
+            else:
+                raise ValueError("sampled_context must include 'source_dir' column pointing to base_processed directory")
             
             # Create all neighbors at once with different random perturbations
             neighbors = self.neighbor_generator.create_efficient_arena_hard_neighbors(
@@ -416,11 +424,12 @@ class ABBSensitivity(SensitivityEstimator):
             # For single-sample neighbors, compute mean absolute change
             # This should be the absolute difference at the perturbed position
             abs_diff = np.abs(original_subset - neighbor_subset)
-            mean_abs_change = np.mean(abs_diff[abs_diff > 0])  # Only count changed positions
-            
-            # If no changes detected (shouldn't happen with proper neighbors), use overall mean
-            if np.isnan(mean_abs_change) or mean_abs_change == 0:
-                mean_abs_change = np.mean(abs_diff)
+            changed = abs_diff > 0
+            if np.any(changed):
+                mean_abs_change = float(np.mean(abs_diff[changed]))
+            else:
+                # No changed positions; fall back to overall mean without emitting warnings
+                mean_abs_change = float(np.mean(abs_diff)) if abs_diff.size else 0.0
             
             differences.append(float(mean_abs_change))
         

@@ -191,33 +191,43 @@ def measure_formatting_sensitivity(judge_name: str,
         # Get diagnostic information
         diagnostics = sensitivity_estimator.get_diagnostics()
         
-        # Save five samples of formatting neighbor transformations for inspection
+        # Save samples by reusing neighbors and scores already computed during A-BB
         formatting_samples = []
         try:
-            for i, sample_row in measurement_samples.head(5).iterrows():
-                question_id = sample_row['question_id']
-                model = sample_row['model']
-                source_dir = Path(sample_row['source_dir'])
-                
-                # Load original response
-                model_file = source_dir / f"{model}.jsonl"
-                if model_file.exists():
-                    with open(model_file, 'r', encoding='utf-8') as f:
-                        for line in f:
-                            data = json.loads(line)
-                            if data.get('question_id') == question_id:
-                                original_response = data.get('choices', [{}])[0].get('turns', [''])[0]
-                                
-                                # Generate formatting neighbors for this sample
-                                neighbors = formatting_generator.generate_neighbors(original_response, num_neighbors=3)
-                                
-                                formatting_samples.append({
-                                    'question_id': question_id,
-                                    'model': model,
-                                    'original_response': original_response,
-                                    'neighbors': neighbors
-                                })
-                                break
+            from differential_debiasing.interfaces.arena_hard_utils import SCORE_TO_PAIRWISE
+            neighbors_exps = sensitivity_estimator.get_sampled_neighbors()  # List[List[Dict]]
+            neighbor_scores = sensitivity_estimator.get_neighbor_judgments()  # List[np.ndarray]
+            original_scores = getattr(sensitivity_estimator, '_original_judgments', None)
+            if neighbors_exps and neighbor_scores and original_scores is not None:
+                # Take up to 5 experiments
+                for exp_idx, (exp_contexts, exp_scores) in enumerate(zip(neighbors_exps[:5], neighbor_scores[:5])):
+                    # Find the perturbed sample in this experiment
+                    perturbed_ctx = next((c for c in exp_contexts if isinstance(c, dict) and c.get('is_formatting_neighbor')), None)
+                    if not perturbed_ctx:
+                        continue
+                    idx = int(perturbed_ctx.get('perturbed_sample_index', -1))
+                    if idx < 0 or idx >= len(original_scores) or idx >= len(exp_scores):
+                        continue
+                    orig_score = float(np.asarray(original_scores).flatten()[idx])
+                    neigh_score = float(np.asarray(exp_scores).flatten()[idx])
+                    # Build sample entry
+                    entry = {
+                        'question_id': perturbed_ctx.get('question_id'),
+                        'model': perturbed_ctx.get('model'),
+                        'original_response': perturbed_ctx.get('original_answer_a', ''),
+                        'neighbors': [perturbed_ctx.get('answer_a', '')],
+                        'original_judgment': {
+                            'pairwise': SCORE_TO_PAIRWISE.get(orig_score),
+                            'score': orig_score
+                        },
+                        'neighbor_judgments': [{
+                            'pairwise': SCORE_TO_PAIRWISE.get(neigh_score),
+                            'score': neigh_score
+                        }]
+                    }
+                    formatting_samples.append(entry)
+            else:
+                print("⚠️ Warning: No neighbor experiments available to log samples.")
         except Exception as e:
             print(f"⚠️ Warning: Could not collect formatting samples: {e}")
             formatting_samples = []

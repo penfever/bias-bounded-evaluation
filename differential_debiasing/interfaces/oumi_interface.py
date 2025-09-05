@@ -21,23 +21,16 @@ import pandas as pd
 # Import sampling utilities
 from ..core.sampling_utils import apply_intelligent_sampling
 
-# Import Arena-Hard-Auto utilities for proper score extraction  
-ARENA_HARD_PATH = Path(__file__).parent.parent.parent / "examples" / "arena-hard-auto"
-sys.path.insert(0, str(ARENA_HARD_PATH))
-
-# Import both utils and gen_judgment for complete Arena-Hard-Auto functionality
-import importlib.util
-spec = importlib.util.spec_from_file_location("arena_utils", ARENA_HARD_PATH / "utils.py")
-arena_utils = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(arena_utils)
-
-spec_judgment = importlib.util.spec_from_file_location("gen_judgment", ARENA_HARD_PATH / "gen_judgment.py")
-gen_judgment = importlib.util.module_from_spec(spec_judgment)
-spec_judgment.loader.exec_module(gen_judgment)
-
-# Extract required functions
-get_score = gen_judgment.get_score
-print("✅ Arena-Hard-Auto score extraction loaded successfully")
+from .arena_hard_utils import (
+    extract_verdict_token,
+    verdict_token_to_score,
+    parse_arena_hard_prompt as util_parse_arena_hard_prompt,
+    load_judgment_data as util_load_judgment_data,
+    build_pairwise_judge_prompt,
+    extract_pairwise_from_judge_response,
+    PAIRWISE_TO_SCORE,
+)
+print("✅ Arena-Hard utilities loaded successfully")
 
 # Import Oumi from environment
 try:
@@ -48,23 +41,7 @@ try:
 except ImportError as e:
     raise ImportError(f"Oumi not available in environment: {e}")
     
-# Arena-Hard pairwise comparison to numerical score mapping
-PAIRWISE_TO_SCORE = {
-    'A>>B': 1.0,  # Assistant A significantly better
-    'A>B': 2.0,   # Assistant A slightly better  
-    'A=B': 3.0,   # Tie
-    'B>A': 4.0,   # Assistant B slightly better
-    'B>>A': 5.0,  # Assistant B significantly better
-    # Handle alternative formats
-    'A<<B': 5.0,
-    'A<B': 4.0,
-    'B=A': 3.0,
-    'B<A': 2.0,
-    'B<<A': 1.0
-}
-
-# Reverse mapping for converting scores back to pairwise comparisons
-SCORE_TO_PAIRWISE = {v: k for k, v in PAIRWISE_TO_SCORE.items()}
+# Mapping is provided by arena_hard_utils
 
 
 class OumiJudgeInterface:
@@ -485,95 +462,37 @@ class OumiJudgeInterface:
     
     
     def _format_judge_prompt(self, context: Dict[str, Any]) -> str:
-        """Format the judge prompt using Arena-Hard-Auto pairwise comparison template."""
-        # Use Arena-Hard-Auto system prompt and template for pairwise comparison
-        system_prompt = """Please act as an impartial judge and evaluate the quality of the responses provided by two AI assistants to the user prompt displayed below. You will be given assistant A's answer and assistant B's answer. Your job is to evaluate which assistant's answer is better.
-
-Begin your evaluation by generating your own answer to the prompt. You must provide your answers before judging any answers.
-
-When evaluating the assistants' answers, compare both assistants' answers with your answer. You must identify and correct any mistakes or inaccurate information.
-
-Then consider if the assistant's answers are helpful, relevant, and concise. Helpful means the answer correctly responds to the prompt or follows the instructions. Note when user prompt has any ambiguity or more than one interpretation, it is more helpful and appropriate to ask for clarifications or more information from the user than providing an answer based on assumptions. Relevant means all parts of the response closely connect or are appropriate to what is being asked. Concise means the response is clear and not verbose or excessive.
-
-Then consider the creativity and novelty of the assistant's answers when needed. Finally, identify any missing important information in the assistants' answers that would be beneficial to include when responding to the user prompt.
-
-After providing your explanation, you must output only one of the following choices as your final verdict with a label:
-
-1. Assistant A is significantly better: [[A>>B]]
-2. Assistant A is slightly better: [[A>B]]
-3. Tie, relatively the same: [[A=B]]
-4. Assistant B is slightly better: [[B>A]]
-5. Assistant B is significantly better: [[B>>A]]
-
-IMPORTANT: You must end your response with exactly one of the bracketed patterns above (e.g., [[A>B]]). Do not include any text after the final verdict pattern.
-
-Example output: "My final verdict is tie: [[A=B]]"."""
-
-        # Arena-Hard-Auto prompt template for pairwise comparison
-        template = """<|User Prompt|>
-{question}
-
-<|The Start of Assistant A's Answer|>
-{answer_a}
-<|The End of Assistant A's Answer|>
-
-<|The Start of Assistant B's Answer|>
-{answer_b}
-<|The End of Assistant B's Answer|>"""
-
-        # For sensitivity analysis, we need to create a pairwise comparison
-        # Use the original answer as A and a neighbor/variation as B (if available)
+        """Format the judge prompt using Arena-Hard pairwise template (delegated to utils)."""
         question = context.get('question', '')
         answer_a = context.get('answer', context.get('answer_a', ''))
-        answer_b = context.get('answer_b', answer_a)  # Use same answer if no variation provided
-        
-        # If we only have one answer, create a simple variation for comparison
+        answer_b = context.get('answer_b', answer_a)
         if answer_a == answer_b and 'neighbor_answer' in context:
             answer_b = context['neighbor_answer']
         elif answer_a == answer_b:
-            # Create a minimal variation by adding a comment
             answer_b = answer_a + "\n\n[This response has been slightly modified for comparison purposes.]"
-
-        try:
-            formatted_prompt = template.format(
-                question=question,
-                answer_a=answer_a,
-                answer_b=answer_b
-            )
-            return system_prompt + "\n\n" + formatted_prompt
-        except KeyError as e:
-            raise ValueError(f"Missing required context key for Arena-Hard-Auto template: {e}")
+        return build_pairwise_judge_prompt(question, answer_a, answer_b)
     
     def _parse_judge_response(self, response: str) -> Dict[str, float]:
         """Parse judge response using Arena-Hard-Auto pairwise comparison patterns."""
         scores = {}
         
-        # Use Arena-Hard-Auto pattern for pairwise comparisons
-        # Pattern matches: [[A>>B]], [[A>B]], [[A=B]], [[B>A]], [[B>>A]]
-        arena_pattern = re.compile(r'\[\[([AB<>=]+)\]\]')
-        
-        # Use Arena-Hard-Auto's get_score function
-        pairwise_result, continue_flag = get_score(response, arena_pattern, pairwise=True)
-        
+        # Extract final verdict via utils
+        pairwise_result = extract_pairwise_from_judge_response(response)
+
         if pairwise_result:
             # Convert pairwise comparison to numerical score using mapping
             if pairwise_result in PAIRWISE_TO_SCORE:
                 scores['overall_score'] = PAIRWISE_TO_SCORE[pairwise_result]
                 scores['pairwise_comparison'] = pairwise_result
             else:
-                raise ValueError(f"Unknown Arena-Hard-Auto pairwise comparison result: '{pairwise_result}'. Expected one of: {list(PAIRWISE_TO_SCORE.keys())}")
+                raise ValueError(
+                    f"Unknown pairwise comparison token: '{pairwise_result}'. "
+                    f"Expected one of: {list(PAIRWISE_TO_SCORE.keys())}"
+                )
         else:
-            # Fallback for formatting issues: try to infer from text patterns
-            fallback_result = self._fallback_parse_comparison(response)
-            if fallback_result:
-                scores['overall_score'] = PAIRWISE_TO_SCORE[fallback_result]
-                scores['pairwise_comparison'] = fallback_result + "_fallback"
-                print(f"⚠️  Used fallback parsing: '{fallback_result}' from response")
-            else:
-                # For dynamic neighbor generation, use neutral score to avoid breaking the pipeline
-                scores['overall_score'] = 3.0  # Neutral/tie score
-                scores['pairwise_comparison'] = "A=B_fallback"
-                print(f"⚠️  Used neutral fallback score for unparseable response (length: {len(response)} chars)")
+            # Strict mode: do not silently fallback; raise with context snippet
+            snippet = response[-400:].replace('\n', ' ') if isinstance(response, str) else str(response)
+            raise ValueError(f"Could not extract Arena-Hard verdict token from judge response. Tail: {snippet}")
             
         return scores
     
@@ -643,49 +562,16 @@ Example output: "My final verdict is tie: [[A=B]]"."""
 
 
 def _load_judgment_data(base_dir: str, question_id: str, model_name: str) -> Dict[str, Any]:
-    """Load judgment data from Arena-Hard-Auto base_processed directory."""
-    import json
-    
-    # Find the correct setting directory
-    for setting_dir in Path(base_dir).glob("*-setting*"):
-        base_processed_dir = setting_dir / "base_processed"
-        if base_processed_dir.exists():
-            model_file = base_processed_dir / f"{model_name}.jsonl"
-            if model_file.exists():
-                with open(model_file, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        data = json.loads(line.strip())
-                        if data.get('question_id') == question_id:
-                            return data
-    
-    raise FileNotFoundError(f"Could not find judgment data for question_id={question_id}, model={model_name}")
+    """Backward-compatible shim: use shared loader from arena_hard_utils."""
+    return util_load_judgment_data(base_dir, question_id, model_name)
 
 def _parse_arena_hard_prompt(user_prompt: str) -> tuple[str, str, str]:
-    """Parse Arena-Hard-Auto prompt to extract question and two answers."""
-    import re
-    
-    # Extract the user question
-    question_match = re.search(r'<\|User Prompt\|>\s*\n(.*?)\s*\n<\|The Start of Assistant A', user_prompt, re.DOTALL)
-    if not question_match:
-        raise ValueError("Could not extract question from Arena-Hard prompt")
-    question = question_match.group(1).strip()
-    
-    # Extract Assistant A's answer
-    answer_a_match = re.search(r'<\|The Start of Assistant A\'s Answer\|>\s*\n(.*?)\s*\n<\|The End of Assistant A\'s Answer\|>', user_prompt, re.DOTALL)
-    if not answer_a_match:
-        raise ValueError("Could not extract Assistant A's answer from Arena-Hard prompt")
-    answer_a = answer_a_match.group(1).strip()
-    
-    # Extract Assistant B's answer  
-    answer_b_match = re.search(r'<\|The Start of Assistant B\'s Answer\|>\s*\n(.*?)\s*\n<\|The End of Assistant B\'s Answer\|>', user_prompt, re.DOTALL)
-    if not answer_b_match:
-        raise ValueError("Could not extract Assistant B's answer from Arena-Hard prompt")
-    answer_b = answer_b_match.group(1).strip()
-    
-    return question, answer_a, answer_b
+    """Backward-compatible shim: use shared parser from arena_hard_utils."""
+    q, a, b = util_parse_arena_hard_prompt(user_prompt)
+    return q, a, b
 
 
-def create_oumi_judge_function(config_path: str, **kwargs) -> callable:
+def create_oumi_judge_function(config_path: str, arena_base_dir: Optional[str] = None, **kwargs) -> callable:
     """
     Create a judge function compatible with A-BB sensitivity estimation using Oumi.
     
@@ -750,50 +636,77 @@ def create_oumi_judge_function(config_path: str, **kwargs) -> callable:
             # CRITICAL: Use fixed random seed for consistent sampling across neighbor calls
             sampled_context = apply_intelligent_sampling(context, random_state=42)
             
-            # Load actual Arena-Hard-Auto data from base_processed directory
-            base_processed_dir = "/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/sos-addl-data/InDepthAnalysis"
-            
             # Build query contexts for batching and/or harvest precomputed scores
             query_contexts: List[Dict[str, Any]] = []
             precomputed_scores: List[Optional[float]] = []
             resolved_mask: List[bool] = []
             row_records: List[tuple] = []  # keep (question_id, model) for alignment
-            for _, row in sampled_context.iterrows():
+            loaded_ok = 0
+            precomputed_ok = 0
+            queued_for_query = 0
+            skipped_rows = 0
+            debug_notes = []
+            for ridx, (_, row) in enumerate(sampled_context.iterrows()):
                 question_id = row['question_id']
                 model_name = row['model']
+                # Determine base directory for this row
+                base_dir_for_row: Optional[str] = None
+                if isinstance(row, pd.Series) and 'source_dir' in row and isinstance(row['source_dir'], str):
+                    base_dir_for_row = row['source_dir']
+                elif arena_base_dir:
+                    base_dir_for_row = arena_base_dir
+                else:
+                    debug_notes.append(f"[{ridx}] no-base-dir qid={question_id} model={model_name}")
+                    skipped_rows += 1
+                    continue
+
                 try:
-                    judgment_data = _load_judgment_data(base_processed_dir, question_id, model_name)
-                    user_prompt = judgment_data['games'][0]['user_prompt']
-                    question, answer_a, answer_b = _parse_arena_hard_prompt(user_prompt)
+                    judgment_data = _load_judgment_data(base_dir_for_row, question_id, model_name)
+                    loaded_ok += 1
                     row_records.append((question_id, model_name))
                     # Try to use precomputed baseline score if available and preferred
                     score_used = None
-                    if self.prefer_existing_scores:
+                    if judge_interface.prefer_existing_scores:
                         try:
-                            # Heuristic: search for pairwise verdict tokens in record
-                            rec_str = json.dumps(judgment_data, ensure_ascii=False)
-                            for token in ['A>>B', 'B>>A', 'A>B', 'B>A', 'A=B']:
-                                if token in rec_str:
-                                    score_used = PAIRWISE_TO_SCORE.get(token)
-                                    break
-                        except Exception:
+                            token = extract_verdict_token(judgment_data)
+                            if token:
+                                from .arena_hard_utils import verdict_token_to_score
+                                score_used = verdict_token_to_score(token)
+                            else:
+                                debug_notes.append(f"[{ridx}] no-token qid={question_id} model={model_name}")
+                        except Exception as ex:
+                            debug_notes.append(f"[{ridx}] token-exc qid={question_id}: {ex}")
                             score_used = None
                     if score_used is not None:
                         precomputed_scores.append(float(score_used))
                         resolved_mask.append(True)
+                        precomputed_ok += 1
                         # placeholder for alignment; no query context for this row
                         query_contexts.append(None)  # type: ignore
                     else:
-                        precomputed_scores.append(None)
-                        resolved_mask.append(False)
-                        query_contexts.append({
-                            'question': question,
-                            'answer_a': answer_a,
-                            'answer_b': answer_b,
-                            'model': model_name
-                        })
-                except Exception:
+                        # Build query context only if we must query
+                        try:
+                            user_prompt = judgment_data['games'][0]['user_prompt']
+                            from .arena_hard_utils import parse_arena_hard_prompt
+                            question, answer_a, answer_b = parse_arena_hard_prompt(user_prompt)
+                            precomputed_scores.append(None)
+                            resolved_mask.append(False)
+                            queued_for_query += 1
+                            query_contexts.append({
+                                'question': question,
+                                'answer_a': answer_a,
+                                'answer_b': answer_b,
+                                'model': model_name
+                            })
+                        except Exception as ex:
+                            debug_notes.append(f"[{ridx}] parse-exc qid={question_id}: {ex}")
+                            # Can't parse prompt to query; skip this row entirely
+                            skipped_rows += 1
+                            continue
+                except Exception as ex:
+                    debug_notes.append(f"[{ridx}] load-exc qid={question_id}: {ex}")
                     # Skip this row if load/parse fails
+                    skipped_rows += 1
                     continue
 
             # If any unresolved, run batched infer only for those rows
@@ -817,7 +730,12 @@ def create_oumi_judge_function(config_path: str, **kwargs) -> callable:
                 # All precomputed
                 scores = [float(pc) for pc in precomputed_scores if pc is not None]
 
-            total_attempted = len(query_contexts)
+            total_attempted = len(resolved_mask)
+            print(f"📋 Baseline path: loaded={loaded_ok}, precomputed={precomputed_ok}, queued={queued_for_query}, skipped={skipped_rows}")
+            if skipped_rows and debug_notes:
+                # Print only first few debug notes to avoid flooding
+                preview = "; ".join(debug_notes[:5])
+                print(f"   🔎 Debug: {preview}{' ...' if len(debug_notes)>5 else ''}")
             successful_samples = len(scores)
             if successful_samples == 0:
                 raise ValueError(f"No valid judgment data found for dynamic scoring in {total_attempted} samples")
@@ -825,7 +743,7 @@ def create_oumi_judge_function(config_path: str, **kwargs) -> callable:
             result = np.array(scores)
             # Report precomputed usage
             try:
-                if self.prefer_existing_scores:
+                if judge_interface.prefer_existing_scores:
                     used = sum(1 for pc in precomputed_scores if pc is not None)
                     print(f"📎 Used precomputed baseline scores for {used}/{successful_samples} samples")
             except Exception:

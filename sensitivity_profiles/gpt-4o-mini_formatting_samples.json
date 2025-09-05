@@ -1,0 +1,57 @@
+{
+  "judge_name": "gpt-4o-mini",
+  "created_date": "2025-09-05T13:57:10.784355+00:00",
+  "description": "Sample formatting neighbor transformations for manual inspection",
+  "samples": [
+    {
+      "question_id": "328c149ed45a41c0b9d6f14659e63599",
+      "model": "Llama-3-8B-Tulu-330K",
+      "original_response": "",
+      "neighbors": [
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "question_id": "93c9b4bb32f4422f954c7af9ea2bdfcd",
+      "model": "Llama-3-8B-Tulu-330K",
+      "original_response": "",
+      "neighbors": [
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "question_id": "e9a2e1240f4a46b6a832bb5d71b20ee1",
+      "model": "opt-125m",
+      "original_response": "",
+      "neighbors": [
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "question_id": "93c9b4bb32f4422f954c7af9ea2bdfcd",
+      "model": "gpt-4-0613",
+      "original_response": "",
+      "neighbors": [
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "question_id": "92abeb14dc734237a9ff52c4062b9b98",
+      "model": "Llama-3-8B-Tulu-330K",
+      "original_response": "",
+      "neighbors": [
+        "",
+        "",
+        ""
+      ]
+    }
+  ]
+}
