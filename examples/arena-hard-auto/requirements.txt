@@ -1,0 +1,14 @@
+tiktoken
+openai
+numpy
+pandas
+shortuuid
+tqdm
+gradio==3.40.0
+httpx==0.25.2
+plotly
+scikit-learn
+factor_analyzer
+matplotlib
+seaborn
+scipy>=1.10.0

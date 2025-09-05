@@ -1,0 +1,84 @@
+{
+  "judge_name": "gpt-4o-mini",
+  "profile_version": "1.0",
+  "created_date": "2025-08-22T19:00:16.163490+00:00",
+  "formatting_sensitivity": {
+    "value": 2.2664570319109663,
+    "confidence_interval": [
+      2.163625074555369,
+      2.3692889892665634
+    ],
+    "samples_used": 20,
+    "neighbors_generated": 10,
+    "measurement_date": "2025-08-22T19:00:16.163378+00:00",
+    "neighbor_differences": [
+      1.9411764705882353,
+      2.1818181818181817,
+      2.230769230769231,
+      2.066666666666667,
+      2.466666666666667,
+      2.3076923076923075,
+      2.466666666666667,
+      2.4615384615384617,
+      2.25,
+      2.230769230769231
+    ],
+    "mean_neighbor_difference": 2.2603763883175647,
+    "std_neighbor_difference": 0.1659097966821387,
+    "cost_info": {
+      "config_path": "/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/differential-debiasing/configs/judges/openai/gpt-4o-mini.yaml",
+      "engine": "OPENAI",
+      "model_name": "gpt-4o-mini-2024-07-18",
+      "spent_usd": 0.7863600000000002,
+      "budget_usd": 10.0,
+      "budget_remaining": 9.21364,
+      "queries_cached": 158
+    },
+    "diagnostics": {
+      "method": "ABBSensitivity",
+      "fitted": true,
+      "bias_sensitivity": 2.2664570319109663,
+      "params": {
+        "random_seed": 42
+      },
+      "rms_sensitivity": 2.2664570319109663,
+      "num_neighbors": 10,
+      "actual_neighbors_sampled": 10,
+      "neighbor_generator": {
+        "generator_type": "FormattingNeighborGenerator",
+        "random_seed": 42,
+        "params": {},
+        "description": "Formatting variations: rephrasing"
+      },
+      "neighbor_differences": [
+        1.9411764705882353,
+        2.1818181818181817,
+        2.230769230769231,
+        2.066666666666667,
+        2.466666666666667,
+        2.3076923076923075,
+        2.466666666666667,
+        2.4615384615384617,
+        2.25,
+        2.230769230769231
+      ],
+      "mean_neighbor_difference": 2.2603763883175647,
+      "std_neighbor_difference": 0.1659097966821387,
+      "max_neighbor_difference": 2.466666666666667,
+      "original_judgment_shape": [
+        20
+      ],
+      "has_judge_function": true
+    }
+  },
+  "measurement_metadata": {
+    "script_version": "1.0",
+    "measurement_approach": "arena_hard_content_perturbation",
+    "neighbor_types": [
+      "whitespace",
+      "capitalization",
+      "punctuation"
+    ],
+    "notes": "Formatting sensitivity measured using Arena-Hard content perturbations"
+  }
+}

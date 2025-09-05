@@ -1,0 +1,13 @@
+engine: ANTHROPIC
+generation:
+  max_new_tokens: 2048
+  temperature: 0.0
+model:
+  model_name: claude-3-5-sonnet-latest
+batch_size: 16
+max_retries: 3
+retry_backoff_sec: 1.0
+remote:
+  api_key: null  # falls back to ANTHROPIC_API_KEY env var if null
+  num_workers: 8
+  politeness_policy: 60.0

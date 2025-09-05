@@ -1,0 +1,13 @@
+engine: OPENAI
+generation:
+  max_new_tokens: 4096
+  temperature: 0.1
+model:
+  model_name: gpt-4o-mini-2024-07-18
+batch_size: 16
+max_retries: 3
+retry_backoff_sec: 1.0
+remote:
+  api_key: null  # falls back to OPENAI_API_KEY env var if null
+  num_workers: 8
+  politeness_policy: 60.0

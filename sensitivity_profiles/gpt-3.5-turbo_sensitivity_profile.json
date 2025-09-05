@@ -1,0 +1,84 @@
+{
+  "judge_name": "gpt-3.5-turbo",
+  "profile_version": "1.0",
+  "created_date": "2025-08-22T19:59:55.121018+00:00",
+  "formatting_sensitivity": {
+    "value": 1.9009031186016714,
+    "confidence_interval": [
+      1.717584830745038,
+      2.0842214064583047
+    ],
+    "samples_used": 20,
+    "neighbors_generated": 10,
+    "measurement_date": "2025-08-22T19:59:55.120676+00:00",
+    "neighbor_differences": [
+      1.7,
+      2.3333333333333335,
+      2.1,
+      2.1,
+      1.3636363636363635,
+      2.1,
+      1.5555555555555556,
+      2.1,
+      1.8,
+      1.625
+    ],
+    "mean_neighbor_difference": 1.8777525252525256,
+    "std_neighbor_difference": 0.29576700325987143,
+    "cost_info": {
+      "config_path": "/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/differential-debiasing/configs/judges/openai/gpt-3.5-turbo.yaml",
+      "engine": "OPENAI",
+      "model_name": "gpt-3.5-turbo-0125",
+      "spent_usd": 0.054846,
+      "budget_usd": 10.0,
+      "budget_remaining": 9.945154,
+      "queries_cached": 158
+    },
+    "diagnostics": {
+      "method": "ABBSensitivity",
+      "fitted": true,
+      "bias_sensitivity": 1.9009031186016714,
+      "params": {
+        "random_seed": 42
+      },
+      "rms_sensitivity": 1.9009031186016714,
+      "num_neighbors": 10,
+      "actual_neighbors_sampled": 10,
+      "neighbor_generator": {
+        "generator_type": "FormattingNeighborGenerator",
+        "random_seed": 42,
+        "params": {},
+        "description": "Formatting variations: rephrasing"
+      },
+      "neighbor_differences": [
+        1.7,
+        2.3333333333333335,
+        2.1,
+        2.1,
+        1.3636363636363635,
+        2.1,
+        1.5555555555555556,
+        2.1,
+        1.8,
+        1.625
+      ],
+      "mean_neighbor_difference": 1.8777525252525256,
+      "std_neighbor_difference": 0.29576700325987143,
+      "max_neighbor_difference": 2.3333333333333335,
+      "original_judgment_shape": [
+        20
+      ],
+      "has_judge_function": true
+    }
+  },
+  "measurement_metadata": {
+    "script_version": "1.0",
+    "measurement_approach": "arena_hard_content_perturbation",
+    "neighbor_types": [
+      "whitespace",
+      "capitalization",
+      "punctuation"
+    ],
+    "notes": "Formatting sensitivity measured using Arena-Hard content perturbations"
+  }
+}

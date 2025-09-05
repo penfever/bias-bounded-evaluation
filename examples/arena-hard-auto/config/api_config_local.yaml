@@ -1,0 +1,63 @@
+# This config file adds support for running HuggingFace models locally
+# name: str
+#     model_name: str
+#     endpoints: default to null
+#         - api_base: str
+#           api_key: str
+#           api_version: str optional (only for azure)
+#     api_type: str
+#     tokenizer: str optional (to optimize token limits)
+#     parallel: int
+
+Meta-Llama-3.1-405B:
+    model_name: meta-llama/Meta-Llama-3.1-405B
+    endpoints: null
+    api_type: huggingface
+    parallel: 8
+
+gpt-3.5-turbo-0125:
+    model_name: gpt-3.5-turbo-0125
+    endpoints: null
+    api_type: openai
+    parallel: 8
+
+gpt-4o-mini-2024-07-18:
+    model_name: gpt-4o-mini-2024-07-18
+    endpoints: null
+    api_type: openai
+    parallel: 8
+
+# Local HuggingFace model configurations
+meta-llama/Llama-3.1-8B-Instruct-local:
+    model_name: meta-llama/Llama-3.1-8B-Instruct
+    endpoints: null
+    api_type: huggingface_local  # Use the local inference engine
+    parallel: 1  # Only run one at a time when using local models to avoid OOM errors
+
+mistral/Mistral-7B-Instruct-v0.2-local:
+    model_name: mistralai/Mistral-7B-Instruct-v0.2
+    endpoints: null
+    api_type: huggingface_local
+    parallel: 1
+
+Qwen/Qwen2.5-7B-Instruct-local:
+    model_name: Qwen/Qwen2.5-7B-Instruct
+    endpoints: null
+    api_type: huggingface_local
+    parallel: 1
+
+# Remote endpoints continue below
+meta-llama/Llama-3.1-8B-Instruct:
+    model_name: meta-llama/Llama-3.1-8B-Instruct
+    endpoints: null
+    api_type: huggingface
+    parallel: 8
+
+google/gemma-2-9b-it:
+    model_name: google/gemma-2-9b-it
+    endpoints: null
+    api_type: huggingface
+    parallel: 1
+
+# Other configurations from original file continue below
+# ...
