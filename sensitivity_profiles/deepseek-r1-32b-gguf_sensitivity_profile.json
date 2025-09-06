@@ -1,19 +1,20 @@
 {
   "judge_name": "deepseek-r1-32b-gguf",
-  "profile_version": "1.0",
-  "created_date": "2025-09-05T15:59:01.958536+00:00",
+  "profile_version": "1.1",
+  "created_date": "2025-09-06T10:51:58.210968+00:00",
   "formatting_sensitivity": {
-    "error": "Could not extract Arena-Hard verdict token from judge response. Tail: 6) P_S (31/36) P_B = (25/36) P_S Multiply both sides by 36: 31 P_B = 25 P_S So P_B = (25/31) P_S  Now, equation from A: P_A = (1/6) + (5/36) P_B + (25/36) P_S Substitute P_B from above: P_A = (1/6) + (5/36)(25/31 P_S) + (25/36) P_S Calculate each term: (5/36)(25/31) = (125)/(1116) (25/36) = (25/36) So P_A = 1/6 + (125/1116) P_S + (25/36) P_S  Convert 1/6 to 186/1116 to have a common denominator: 1",
-    "measurement_date": "2025-09-05T15:59:01.957955+00:00"
+    "error": "name 'args' is not defined",
+    "measurement_date": "2025-09-06T10:51:58.210803+00:00"
   },
   "measurement_metadata": {
-    "script_version": "1.0",
+    "script_version": "1.1",
     "measurement_approach": "arena_hard_content_perturbation",
     "neighbor_types": [
       "whitespace",
       "capitalization",
       "punctuation"
     ],
-    "notes": "Formatting sensitivity measured using Arena-Hard content perturbations"
+    "notes": "Formatting sensitivity measured using Arena-Hard content perturbations",
+    "dataset_id": "DeepSeek-R1-32B-setting1"
   }
 }

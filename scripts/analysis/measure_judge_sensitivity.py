@@ -58,13 +58,14 @@ def get_judge_config_path(judge_name: str) -> Path:
 # (find_sample_data moved to differential_debiasing.interfaces.arena_hard_utils)
 
 
-def measure_formatting_sensitivity(judge_name: str, 
+def measure_formatting_sensitivity(judge_name: str,
                                  sample_data: pd.DataFrame,
                                  num_neighbors: int = 40,
                                  target_samples: int = 20,
                                  cost_budget_usd: float = 10.0,
                                  prefer_existing_scores: bool = False,
-                                 disable_transforms: bool = False) -> Dict[str, Any]:
+                                 disable_transforms: bool = False,
+                                 oumi_retries: int = 3) -> Dict[str, Any]:
     """
     Measure formatting sensitivity for a specific judge.
     
@@ -95,7 +96,8 @@ def measure_formatting_sensitivity(judge_name: str,
             cost_budget_usd=cost_budget_usd,
             cache_responses=True,
             # Control reuse of cached baseline scores via CLI flag
-            prefer_existing_scores=prefer_existing_scores
+            prefer_existing_scores=prefer_existing_scores,
+            n_retries=oumi_retries
         )
         print(f"✅ Created judge function for {judge_name}")
         
@@ -106,10 +108,12 @@ def measure_formatting_sensitivity(judge_name: str,
         # Create formatting neighbor generator
         formatting_generator = FormattingNeighborGenerator(
             text_fields=['answer_a', 'answer_b'],
-            formatting_types=['whitespace', 'capitalization', 'punctuation'],
+            formatting_types=['rephrasing'],
             single_field=True,
             disable_transforms=disable_transforms,
-            random_seed=42
+            random_seed=42,
+            oumi_config_path=str(judge_config_path),
+            oumi_retries=oumi_retries
         )
         
         # Create ABB sensitivity estimator
@@ -129,7 +133,7 @@ def measure_formatting_sensitivity(judge_name: str,
         # Fit the estimator
         sensitivity_estimator.fit(measurement_samples)
         
-        # Get sensitivity estimate
+        # Get sensitivity estimate (RMS in the dataset's numeric score space, e.g., 1..5 Likert)
         sensitivity_value = sensitivity_estimator.estimate()
         
         # Get diagnostic information
@@ -250,10 +254,19 @@ def measure_formatting_sensitivity(judge_name: str,
             'cost_info': cost_info,
             'diagnostics': diagnostics,
             'formatting_samples': formatting_samples,
-            'baseline_scores': baseline_scores
+            'baseline_scores': baseline_scores,
+            # Explicit representation metadata for clarity in downstream reporting
+            'representation': {
+                'type': 'likert_numeric',
+                'min_score': 1.0,
+                'max_score': 5.0
+            },
+            # Tag whether transforms were disabled (this denotes intrinsic jitter runs)
+            'disable_transforms': bool(disable_transforms)
         }
         
-        print(f"✅ Formatting sensitivity measured: {sensitivity_value:.4f} (95% CI: [{confidence_interval[0]:.4f}, {confidence_interval[1]:.4f}])")
+        label = "intrinsic jitter (RMS)" if disable_transforms else "formatting sensitivity (RMS)"
+        print(f"✅ {label} measured: {sensitivity_value:.4f} (95% CI: [{confidence_interval[0]:.4f}, {confidence_interval[1]:.4f}])")
         
         return measurement_result
         
@@ -265,9 +278,30 @@ def measure_formatting_sensitivity(judge_name: str,
         }
 
 
-def save_sensitivity_profile(judge_name: str, 
-                           formatting_result: Dict[str, Any],
-                           output_dir: Path) -> Path:
+def _infer_dataset_id(sample_data: pd.DataFrame) -> str:
+    """Infer a dataset identifier from Arena-Hard sample_data source_dir.
+
+    Uses the parent directory name of the base_processed folder, e.g.,
+    <...>/GPT-4o-mini-0718-setting1/base_processed -> GPT-4o-mini-0718-setting1
+    Falls back to 'unknown_dataset' if not resolvable.
+    """
+    try:
+        if 'source_dir' in sample_data.columns:
+            parents = [Path(p).resolve().parent.name for p in sample_data['source_dir'].dropna().unique().tolist()]
+            parents = [p for p in parents if p]
+            if parents:
+                # If multiple, pick the most common
+                from collections import Counter
+                return Counter(parents).most_common(1)[0][0]
+    except Exception:
+        pass
+    return 'unknown_dataset'
+
+
+def save_sensitivity_profile(judge_name: str,
+                           measurement_result: Dict[str, Any],
+                           output_dir: Path,
+                           sample_data: Optional[pd.DataFrame] = None) -> Path:
     """
     Save sensitivity profile to JSON file.
     
@@ -288,23 +322,38 @@ def save_sensitivity_profile(judge_name: str,
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Extract formatting samples for separate file
-    formatting_samples = formatting_result.pop('formatting_samples', [])
+    formatting_samples = measurement_result.pop('formatting_samples', [])
+
+    # Determine dataset id if available
+    dataset_id = _infer_dataset_id(sample_data) if sample_data is not None else 'unknown_dataset'
+
+    # Decide which section to populate based on disable_transforms flag
+    is_intrinsic = bool(measurement_result.get('disable_transforms', False))
+    profile_key = 'intrinsic_sensitivity' if is_intrinsic else 'formatting_sensitivity'
+    profile_version = '1.1'
     
     profile_data = {
         'judge_name': judge_name,
-        'profile_version': '1.0',
+        'profile_version': profile_version,
         'created_date': datetime.now(timezone.utc).isoformat(),
-        'formatting_sensitivity': formatting_result,
+        profile_key: measurement_result,
         'measurement_metadata': {
-            'script_version': '1.0',
-            'measurement_approach': 'arena_hard_content_perturbation',
-            'neighbor_types': ['whitespace', 'capitalization', 'punctuation'],
-            'notes': 'Formatting sensitivity measured using Arena-Hard content perturbations'
+            'script_version': '1.1',
+            'measurement_approach': 'intrinsic_jitter' if is_intrinsic else 'arena_hard_content_perturbation',
+            'neighbor_types': ['none'] if is_intrinsic else ['rephrasing'],
+            'notes': 'Intrinsic jitter measured with transforms disabled' if is_intrinsic else 'Formatting sensitivity measured using Arena-Hard content perturbations',
+            'dataset_id': dataset_id
         }
     }
     
     # Save main profile
-    profile_file = output_dir / f"{judge_name}_sensitivity_profile.json"
+    # If intrinsic, organize under dataset-specific subdirectory to ensure dataset+judge pairing
+    if is_intrinsic and dataset_id != 'unknown_dataset':
+        output_dir = output_dir / dataset_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+        profile_file = output_dir / f"{judge_name}_intrinsic_profile.json"
+    else:
+        profile_file = output_dir / f"{judge_name}_sensitivity_profile.json"
     with open(profile_file, 'w', encoding='utf-8') as f:
         json.dump(profile_data, f, indent=2, ensure_ascii=False)
     
@@ -373,10 +422,19 @@ def main():
     
     output_dir = Path(args.output_dir)
     
-    # Check if profile already exists
-    existing_profile = output_dir / f"{args.judge}_sensitivity_profile.json"
-    if existing_profile.exists():
-        print(f"⚠️  Sensitivity profile already exists: {existing_profile}")
+    # Check if profile already exists (account for intrinsic vs formatting and dataset scoping)
+    # Compute a quick dataset id guess for file naming
+    try:
+        temp_samples = find_arena_sample_data(Path(args.data_path), judge_name=args.judge, max_samples=5)
+        dataset_id = _infer_dataset_id(temp_samples)
+    except Exception:
+        dataset_id = 'unknown_dataset'
+    if args.disable_transforms and dataset_id != 'unknown_dataset':
+        candidate = output_dir / dataset_id / f"{args.judge}_intrinsic_profile.json"
+    else:
+        candidate = output_dir / f"{args.judge}_sensitivity_profile.json"
+    if candidate.exists():
+        print(f"⚠️  Sensitivity profile already exists: {candidate}")
         response = input("Overwrite existing profile? [y/N]: ").strip().lower()
         if response != 'y':
             print("Aborted.")
@@ -401,7 +459,8 @@ def main():
             target_samples=args.samples,
             cost_budget_usd=args.budget,
             prefer_existing_scores=args.reuse_baseline,
-            disable_transforms=args.disable_transforms
+            disable_transforms=args.disable_transforms,
+            oumi_retries=args.oumi_retries
         )
         
         # Compute Hamming-1 sensitivity using baseline scores only (no extra judge calls)
@@ -435,8 +494,9 @@ def main():
         # Save sensitivity profile
         profile_file = save_sensitivity_profile(
             judge_name=args.judge,
-            formatting_result=formatting_result,
-            output_dir=output_dir
+            measurement_result=formatting_result,
+            output_dir=output_dir,
+            sample_data=sample_data
         )
         
         # Print summary

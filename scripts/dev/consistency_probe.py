@@ -22,6 +22,7 @@ from pathlib import Path
 import numpy as np
 
 from differential_debiasing.interfaces.oumi_interface import create_oumi_judge_function
+from differential_debiasing.core.utils import rms_from_differences
 from differential_debiasing.interfaces.arena_hard_utils import (
     find_sample_data as find_arena_sample_data,
     load_judgment_data as load_arena_judgment,
@@ -189,8 +190,8 @@ def main():
     counts = Counter(tokens)
     mode_token, mode_count = counts.most_common(1)[0]
     baseline = scores[0]
-    sq_diffs = [(s - baseline) ** 2 for s in scores]
-    rms_sensitivity = float(np.sqrt(np.mean(sq_diffs)))
+    diffs = [s - baseline for s in scores]
+    rms_sensitivity = rms_from_differences(diffs)
     token_disagreement = sum(1 for t in tokens if t != tokens[0])
 
     print("\nSummary:")

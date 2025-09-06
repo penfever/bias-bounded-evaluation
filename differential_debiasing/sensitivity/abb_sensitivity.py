@@ -8,6 +8,7 @@ from typing import Union, Dict, Any, Optional, List, Callable
 
 from .base import SensitivityEstimator
 from ..neighbors import BaseNeighborGenerator, HammingNeighborGenerator
+from ..core.utils import rms_from_differences
 
 
 class ABBSensitivity(SensitivityEstimator):
@@ -53,6 +54,7 @@ class ABBSensitivity(SensitivityEstimator):
         
         # Initialize neighbor generator
         self.neighbor_generator = self._create_neighbor_generator(neighbor_generator, **kwargs)
+        self._neighbor_type = self.neighbor_generator.__class__.__name__.replace('NeighborGenerator', '').lower()
         
         # State for RMS calculation
         self._original_judgments = None
@@ -277,7 +279,7 @@ class ABBSensitivity(SensitivityEstimator):
         neighbor_judgments = []
         
         # Get neighbor type name for better progress description
-        neighbor_type = self.neighbor_generator.__class__.__name__.replace('NeighborGenerator', '').lower()
+        neighbor_type = self._neighbor_type
         
         if fast_path:
             print(f"🧪 Neighbor experiments: {len(neighbors)} (single-sample fast path)")
@@ -345,9 +347,9 @@ class ABBSensitivity(SensitivityEstimator):
         
         neighbor_differences = self.get_neighbor_differences()
         
-        # Compute RMS of mean absolute changes
+        # Compute RMS of per-experiment changes via shared utility
         if neighbor_differences:
-            rms_sensitivity = np.sqrt(np.mean([diff**2 for diff in neighbor_differences]))
+            rms_sensitivity = rms_from_differences(neighbor_differences)
             self._rms_sensitivity = rms_sensitivity
             
             # Check for problematic values (NaN, inf)
@@ -358,7 +360,7 @@ class ABBSensitivity(SensitivityEstimator):
                 self._rms_sensitivity = 0.0
             
             # Debug output
-            print(f"🔍 {self.__class__.__name__} single-sample sensitivity debug:")
+            print(f"🔍 {self.__class__.__name__} single-sample sensitivity debug (neighbor_type={self._neighbor_type}):")
             print(f"   Dataset size: {dataset_size}")
             print(f"   Original scores range: [{original.min():.1f}, {original.max():.1f}]")
             print(f"   Mean absolute changes: {[f'{d:.3f}' for d in neighbor_differences[:5]]}")

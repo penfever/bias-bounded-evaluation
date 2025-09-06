@@ -49,11 +49,13 @@ class OumiJudgeInterface:
     Unified judge interface using Oumi for both API-based and local GGUF models.
     """
     
-    def __init__(self, 
+    def __init__(self,
                  config_path: str,
                  cost_budget_usd: float = 10.0,
                  cache_responses: bool = True,
-                 prefer_existing_scores: bool = True):
+                 prefer_existing_scores: bool = True,
+                 n_retries: Optional[int] = None,
+                 retry_backoff_sec: Optional[float] = None):
         """
         Initialize Oumi judge interface.
         
@@ -86,8 +88,13 @@ class OumiJudgeInterface:
         
         # Batching configuration
         self.batch_size = int(self.config.get('batch_size', os.getenv('OUMI_BATCH_SIZE', 8)))
-        self.max_retries = int(self.config.get('max_retries', os.getenv('OUMI_MAX_RETRIES', 3)))
-        self.retry_backoff_sec = float(self.config.get('retry_backoff_sec', os.getenv('OUMI_RETRY_BACKOFF_SEC', 1.0)))
+        # Retry configuration: CLI overrides > config > env > defaults
+        cfg_retries = self.config.get('max_retries', None)
+        env_retries = os.getenv('OUMI_MAX_RETRIES')
+        self.max_retries = int(n_retries if n_retries is not None else (cfg_retries if cfg_retries is not None else (env_retries or 3)))
+        cfg_backoff = self.config.get('retry_backoff_sec', None)
+        env_backoff = os.getenv('OUMI_RETRY_BACKOFF_SEC')
+        self.retry_backoff_sec = float(retry_backoff_sec if retry_backoff_sec is not None else (cfg_backoff if cfg_backoff is not None else (env_backoff or 1.0)))
     
     def _load_oumi_config(self) -> Dict[str, Any]:
         """Load Oumi inference configuration."""
@@ -261,79 +268,79 @@ class OumiJudgeInterface:
         return response
     
     def _query_with_oumi(self, prompt: str) -> Dict[str, Any]:
-        """Query using Oumi library directly."""
+        """Query using Oumi library directly with retries and backoff."""
         engine = self._get_inference_engine()
         if engine is None:
             raise RuntimeError("Oumi inference engine not available")
-        
-        # Create conversation (string content for infer_online)
+
+        # Prepare conversation
         conversation = Conversation(messages=[Message(role=Role.USER, content=prompt)])
-        
-        # Generate response using correct Oumi API
-        try:
-            # Build inference config from existing config/engine
-            gen_config = self.config.get('generation', {})
-            generation_params = GenerationParams(
-                max_new_tokens=gen_config.get('max_new_tokens', 2048),
-                temperature=gen_config.get('temperature', 0.0),
-                top_p=gen_config.get('top_p', 0.9)
-            )
-            inference_config = InferenceConfig(
-                generation=generation_params,
-                model=getattr(engine, '_model_params', None)
-            )
-            
-            # Prefer infer_online; fall back to infer if not available
-            if hasattr(engine, 'infer_online'):
-                response_conversations = engine.infer_online([conversation], inference_config)
-            else:
-                conv = Conversation(messages=[
-                    Message(role=Role.USER, content=[ContentItem(type=Type.TEXT, content=prompt)])
-                ])
-                response_conversations = engine.infer(input=[conv])
-            
-            # Extract response text from the returned conversation list
-            if response_conversations and len(response_conversations) > 0:
-                response_conversation = response_conversations[0]
-                if hasattr(response_conversation, 'messages') and response_conversation.messages:
-                    # Find the assistant's response (last message)
-                    for message in reversed(response_conversation.messages):
-                        if hasattr(message, 'role') and message.role == Role.ASSISTANT:
-                            if hasattr(message, 'content') and message.content:
-                                # Handle both string content and ContentItem list
-                                if isinstance(message.content, str):
-                                    response_text = message.content
-                                elif isinstance(message.content, list):
-                                    # Use helper method to get flattened text
-                                    response_text = message.compute_flattened_text_content()
-                                else:
-                                    response_text = str(message.content)
-                                break
-                    else:
-                        # No assistant message found, take the last message
-                        last_message = response_conversation.messages[-1]
-                        if hasattr(last_message, 'content') and last_message.content:
-                            if isinstance(last_message.content, str):
-                                response_text = last_message.content
-                            elif isinstance(last_message.content, list):
-                                response_text = last_message.compute_flattened_text_content()
-                            else:
-                                response_text = str(last_message.content)
-                        else:
-                            response_text = str(last_message)
+
+        attempt = 0
+        while True:
+            try:
+                # Build inference config
+                gen_config = self.config.get('generation', {})
+                generation_params = GenerationParams(
+                    max_new_tokens=gen_config.get('max_new_tokens', 2048),
+                    temperature=gen_config.get('temperature', 0.0),
+                    top_p=gen_config.get('top_p', 0.9)
+                )
+                inference_config = InferenceConfig(
+                    generation=generation_params,
+                    model=getattr(engine, '_model_params', None)
+                )
+
+                # Prefer infer_online; fall back to infer
+                if hasattr(engine, 'infer_online'):
+                    response_conversations = engine.infer_online([conversation], inference_config)
                 else:
-                    response_text = str(response_conversation)
-            else:
-                response_text = ""
-            
-            return {
-                'raw_output': response_text,
-                'token_count': len(response_text.split()) if isinstance(response_text, str) else 0,
-                'api_type': 'oumi_direct'
-            }
-            
-        except Exception as e:
-            raise RuntimeError(f"Oumi direct inference failed: {e}")
+                    conv = Conversation(messages=[
+                        Message(role=Role.USER, content=[ContentItem(type=Type.TEXT, content=prompt)])
+                    ])
+                    response_conversations = engine.infer(input=[conv])
+
+                # Extract text
+                if response_conversations and len(response_conversations) > 0:
+                    response_conversation = response_conversations[0]
+                    if hasattr(response_conversation, 'messages') and response_conversation.messages:
+                        for message in reversed(response_conversation.messages):
+                            if hasattr(message, 'role') and message.role == Role.ASSISTANT:
+                                if hasattr(message, 'content') and message.content:
+                                    if isinstance(message.content, str):
+                                        response_text = message.content
+                                    elif isinstance(message.content, list):
+                                        response_text = message.compute_flattened_text_content()
+                                    else:
+                                        response_text = str(message.content)
+                                    break
+                        else:
+                            last_message = response_conversation.messages[-1]
+                            if hasattr(last_message, 'content') and last_message.content:
+                                if isinstance(last_message.content, str):
+                                    response_text = last_message.content
+                                elif isinstance(last_message.content, list):
+                                    response_text = last_message.compute_flattened_text_content()
+                                else:
+                                    response_text = str(last_message.content)
+                            else:
+                                response_text = str(last_message)
+                    else:
+                        response_text = str(response_conversation)
+                else:
+                    response_text = ""
+
+                return {
+                    'raw_output': response_text,
+                    'token_count': len(response_text.split()) if isinstance(response_text, str) else 0,
+                    'api_type': 'oumi_direct'
+                }
+            except Exception as e:
+                attempt += 1
+                if attempt > self.max_retries:
+                    raise RuntimeError(f"Oumi direct inference failed after {self.max_retries} retries: {e}")
+                import time
+                time.sleep(self.retry_backoff_sec * (2 ** (attempt - 1)))
 
     def _infer_conversations(self, conversations: List[Conversation]) -> List[str]:
         """Infer a batch of conversations and return assistant text per item (order-preserving)."""

@@ -35,6 +35,8 @@ class SensitivityProfile:
         
         # Extract sensitivity measurements
         self.formatting_sensitivity = profile_data.get('formatting_sensitivity', {})
+        # Optional: intrinsic jitter (may be present in intrinsic profiles)
+        self.intrinsic_sensitivity = profile_data.get('intrinsic_sensitivity', {})
         
         # Validation
         self._validate()
@@ -83,6 +85,16 @@ class SensitivityProfile:
         if ci and len(ci) == 2:
             return (float(ci[0]), float(ci[1]))
         return None
+
+    def get_intrinsic_sensitivity(self) -> Optional[float]:
+        """
+        Get intrinsic jitter RMS value if present in this profile.
+        """
+        if not self.intrinsic_sensitivity:
+            return None
+        if 'error' in self.intrinsic_sensitivity:
+            return None
+        return float(self.intrinsic_sensitivity.get('value', 0.0))
     
     def is_fresh(self, max_age_days: int = 30) -> bool:
         """
@@ -332,6 +344,30 @@ class SensitivityProfileManager:
         """Clear the profile cache."""
         self._profile_cache.clear()
 
+    # Dataset-scoped intrinsic profile helpers
+    def load_intrinsic_profile_for_dataset(self, judge_name: str, dataset_id: str) -> Optional[SensitivityProfile]:
+        """
+        Load an intrinsic jitter profile for a specific (dataset, judge) pair.
+
+        Looks under `<profile_dir>/<dataset_id>/<judge_name>_intrinsic_profile.json`.
+        """
+        dataset_dir = self.profile_dir / dataset_id
+        profile_file = dataset_dir / f"{judge_name}_intrinsic_profile.json"
+        if not profile_file.exists():
+            return None
+        try:
+            with open(profile_file, 'r', encoding='utf-8') as f:
+                profile_data = json.load(f)
+            return SensitivityProfile(profile_data)
+        except Exception as e:
+            warnings.warn(f"Failed to load intrinsic profile for {judge_name} on {dataset_id}: {e}")
+            return None
+
+    def get_intrinsic_sensitivity_for_dataset(self, judge_name: str, dataset_id: str) -> Optional[float]:
+        """Convenience getter for intrinsic jitter RMS for (dataset, judge)."""
+        prof = self.load_intrinsic_profile_for_dataset(judge_name, dataset_id)
+        return prof.get_intrinsic_sensitivity() if prof else None
+
 
 # Convenience functions for common operations
 
@@ -353,6 +389,16 @@ def load_judge_sensitivity_profile(judge_name: str,
     """
     manager = SensitivityProfileManager(profile_dir)
     return manager.load_profile(judge_name)
+
+
+def load_intrinsic_sensitivity_profile(judge_name: str,
+                                       dataset_id: str,
+                                       profile_dir: Union[str, Path] = "sensitivity_profiles") -> Optional[SensitivityProfile]:
+    """
+    Load an intrinsic jitter profile for a (dataset, judge) pair.
+    """
+    manager = SensitivityProfileManager(profile_dir)
+    return manager.load_intrinsic_profile_for_dataset(judge_name, dataset_id)
 
 
 def get_formatting_sensitivity(judge_name: str,

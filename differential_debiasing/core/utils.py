@@ -265,6 +265,33 @@ def check_bias_parameters(tau: float, delta: float) -> None:
         raise ValueError(f"delta must be in (0, 1), got {delta}")
 
 
+# --- RMS Sensitivity utilities ---
+
+def rms_from_differences(diffs: Union[List[float], np.ndarray]) -> float:
+    """
+    Compute RMS from a collection of per-experiment differences.
+
+    Equivalent to sqrt(mean(diff_i^2)). Returns 0.0 for empty input.
+    """
+    if diffs is None:
+        return 0.0
+    arr = np.asarray(list(diffs), dtype=float)
+    if arr.size == 0:
+        return 0.0
+    return float(np.sqrt(np.mean(np.square(arr))))
+
+
+def context_adjusted_rms(total_rms: float, intrinsic_rms: float) -> float:
+    """
+    Compute context-adjusted RMS given total and intrinsic RMS values.
+
+    Uses sqrt(max(0, total_rms^2 - intrinsic_rms^2)).
+    """
+    if total_rms is None or intrinsic_rms is None:
+        raise ValueError("total_rms and intrinsic_rms must be provided")
+    return float(np.sqrt(max(0.0, float(total_rms) ** 2 - float(intrinsic_rms) ** 2)))
+
+
 def estimate_r_squared_from_scores(df: pd.DataFrame, 
                                   factor_columns: List[str],
                                   target_column: str = 'score') -> float:

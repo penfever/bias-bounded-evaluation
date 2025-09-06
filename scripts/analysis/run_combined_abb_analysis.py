@@ -22,7 +22,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from differential_debiasing.core.debias import DifferentialDebias
 from differential_debiasing.core.config import ConfigManager
-from differential_debiasing.core.sensitivity_profiles import load_judge_sensitivity_profile, get_formatting_sensitivity
+from differential_debiasing.core.sensitivity_profiles import (
+    load_judge_sensitivity_profile,
+    get_formatting_sensitivity,
+    load_intrinsic_sensitivity_profile,
+    SensitivityProfileManager,
+)
+from differential_debiasing.core.utils import context_adjusted_rms
 from differential_debiasing.interfaces.oumi_interface import create_oumi_judge_function
 
 def get_judge_config_path(judge_name: str) -> Path:
@@ -208,7 +214,7 @@ def load_and_prepare_score_data(judge_name: str, base_path: Path) -> pd.DataFram
 
 ## Synthetic judge removed: script now exclusively uses real judges via Oumi
 
-def check_sensitivity_profiles(real_judge_name: str) -> Dict[str, Any]:
+def check_sensitivity_profiles(real_judge_name: str, dataset_id: str) -> Dict[str, Any]:
     """
     Check for available sensitivity profiles for a judge.
     
@@ -227,6 +233,8 @@ def check_sensitivity_profiles(real_judge_name: str) -> Dict[str, Any]:
     profile_info = {
         'profile_available': False,
         'formatting_sensitivity': None,
+        'intrinsic_sensitivity': None,
+        'context_adjusted_rms': None,
         'profile_dir': str(profile_dir)
     }
     
@@ -235,11 +243,28 @@ def check_sensitivity_profiles(real_judge_name: str) -> Dict[str, Any]:
         if profile:
             formatting_sensitivity = profile.get_formatting_sensitivity()
             if formatting_sensitivity is not None:
-                profile_info['profile_available'] = True
                 profile_info['formatting_sensitivity'] = formatting_sensitivity
-                print(f"✅ Found sensitivity profile for {real_judge_name}: formatting={formatting_sensitivity:.4f}")
+                profile_info['profile_available'] = True
+                print(f"✅ Found formatting profile for {real_judge_name}: {formatting_sensitivity:.4f}")
             else:
                 print(f"⚠️ Profile found for {real_judge_name} but formatting sensitivity is missing/failed")
+
+        # Try dataset-scoped intrinsic jitter profile
+        mgr = SensitivityProfileManager(profile_dir)
+        intrinsic = mgr.get_intrinsic_sensitivity_for_dataset(real_judge_name, dataset_id)
+        if intrinsic is not None:
+            profile_info['intrinsic_sensitivity'] = intrinsic
+            print(f"✅ Found intrinsic jitter for ({dataset_id}, {real_judge_name}): {intrinsic:.4f}")
+        else:
+            print(f"📋 No intrinsic jitter profile found for dataset={dataset_id}, judge={real_judge_name}")
+
+        # Derive context-adjusted RMS if both available
+        if profile_info['formatting_sensitivity'] is not None and profile_info['intrinsic_sensitivity'] is not None:
+            tot = float(profile_info['formatting_sensitivity'])
+            intr = float(profile_info['intrinsic_sensitivity'])
+            ctx = context_adjusted_rms(tot, intr)
+            profile_info['context_adjusted_rms'] = ctx
+            print(f"🎯 Context-adjusted RMS for ({dataset_id}, {real_judge_name}): {ctx:.4f}")
         else:
             print(f"📋 No sensitivity profile found for {real_judge_name}")
     except Exception as e:
@@ -248,15 +273,15 @@ def check_sensitivity_profiles(real_judge_name: str) -> Dict[str, Any]:
     return profile_info
 
 
-def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str, 
+def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                               real_judge_name: str) -> Dict[str, Any]:
     """Run Combined A-BB debiasing approaches on the judge data."""
     print(f"\nRunning Combined A-BB analysis for {judge_name}...")
     
     config_manager = ConfigManager()
     
-    # Check for sensitivity profiles for the real judge
-    profile_info = check_sensitivity_profiles(real_judge_name)
+    # Check for sensitivity profiles for the real judge, and dataset-scoped intrinsic jitter
+    profile_info = check_sensitivity_profiles(real_judge_name, dataset_id=judge_name)
     
     # Create real judge function using Oumi interface with cost management
     print(f"Attempting to use real judge: {real_judge_name}")
@@ -272,17 +297,25 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
     
     # Determine dynamic generators based on profile availability
     # If we have formatting sensitivity profile, skip expensive formatting measurement
-    if profile_info and profile_info['profile_available']:
-        dynamic_generators = ['hamming']  # Only use fast hamming, skip slow formatting
-        print(f"🚀 Using sensitivity profile - skipping expensive formatting measurement")
-    else:
-        dynamic_generators = ['hamming', 'formatting']  # Use both
-        print(f"📏 No profile available - will measure hamming and formatting dynamically")
+    # Context-aware sensitivity is required: both intrinsic (dataset+judge) and formatting (judge) must exist.
+    # Loudly fail if missing; do not fall back to dynamic formatting.
+    profile_override = None
+    ctx = profile_info.get('context_adjusted_rms') if profile_info else None
+    if ctx is None:
+        raise RuntimeError(
+            "Context-adjusted RMS is required but missing. "
+            f"Ensure both profiles exist: (a) intrinsic jitter for dataset='{judge_name}' and judge='{real_judge_name}' "
+            f"via: measure_judge_sensitivity.py --judge {real_judge_name} --disable-transforms, and (b) formatting RMS for judge '{real_judge_name}'."
+        )
+    dynamic_generators = ['hamming', 'formatting']
+    profile_override = {'value': float(ctx)}
+    print(f"🚀 Using Context-Adjusted RMS for formatting: {ctx:.4f}")
 
     # Define Combined A-BB approaches with different aggregation strategies  
     # Using relaxed tau/delta for conservative strategy to help with constraint satisfaction
     # Choose estimator type based on profile availability
-    estimator_type = 'profile_enhanced_abb' if (profile_info and profile_info['profile_available']) else 'combined_abb'
+    # Use profile-enhanced estimator when we have any profile override or judge-level profile
+    estimator_type = 'profile_enhanced_abb'
     
     approaches = {
         'combined_abb_conservative': {
@@ -298,7 +331,7 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                 'target_samples': 10,  # Efficient sampling for dynamic scoring
                 'dimensionality': None,
                 'judge_function': judge_function,
-                'sensitivity_profile': real_judge_name if profile_info and profile_info['profile_available'] else None,
+                'sensitivity_profile': (profile_override if profile_override is not None else (real_judge_name if profile_info and profile_info.get('profile_available') else None)),
                 'profile_dir': str(Path(__file__).parent.parent.parent / "sensitivity_profiles")
             }
         },
@@ -315,7 +348,7 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                 'target_samples': 10,  # Efficient sampling for dynamic scoring
                 'dimensionality': None,
                 'judge_function': judge_function,
-                'sensitivity_profile': real_judge_name if profile_info and profile_info['profile_available'] else None,
+                'sensitivity_profile': (profile_override if profile_override is not None else (real_judge_name if profile_info and profile_info.get('profile_available') else None)),
                 'profile_dir': str(Path(__file__).parent.parent.parent / "sensitivity_profiles")
             }
         },
@@ -388,6 +421,10 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                 'diagnostics': {
                     'bias_sensitivity': float(diagnostics.get('bias_sensitivity', 0)) if diagnostics.get('bias_sensitivity') is not None else 0,
                     'combined_sensitivity': float(diagnostics.get('abb_constraint_validation', {}).get('combined_sensitivity', 0)) if diagnostics.get('abb_constraint_validation', {}).get('combined_sensitivity') is not None else 0,
+                    # Context-adjusted formatting RMS used (if available)
+                    'context_adjusted_formatting_rms': float(profile_info['context_adjusted_rms']) if profile_info.get('context_adjusted_rms') is not None else None,
+                    'formatting_profile_rms': float(profile_info['formatting_sensitivity']) if profile_info.get('formatting_sensitivity') is not None else None,
+                    'intrinsic_profile_rms': float(profile_info['intrinsic_sensitivity']) if profile_info.get('intrinsic_sensitivity') is not None else None,
                     'tau': float(bias_bounds['tau']),
                     'delta': float(bias_bounds['delta']),
                     'noise_std': float(bias_bounds['noise_std']),

@@ -13,39 +13,16 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Union, Optional, Any
-import sys
 import time
 import hashlib
 import numpy as np
 import pandas as pd
 
-# Add arena-hard-auto to path for imports (using local copy in examples)
-ARENA_HARD_PATH = Path(__file__).parent.parent.parent / "examples" / "arena-hard-auto"
-sys.path.insert(0, str(ARENA_HARD_PATH))  # Insert at beginning to prioritize
-
-try:
-    # Import from arena-hard-auto utils specifically
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("arena_utils", ARENA_HARD_PATH / "utils.py")
-    arena_utils = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(arena_utils)
-    
-    chat_completion_openai = arena_utils.chat_completion_openai
-    chat_completion_anthropic = arena_utils.chat_completion_anthropic
-    chat_completion_together = arena_utils.chat_completion_together
-    chat_completion_huggingface = arena_utils.chat_completion_huggingface
-    chat_completion_huggingface_local = arena_utils.chat_completion_huggingface_local
-    make_config = arena_utils.make_config
-    
-except Exception as e:
-    print(f"Warning: Could not import Arena-Hard Auto utils: {e}")
-    # We'll handle this gracefully by implementing fallback methods
-    chat_completion_openai = None
-    chat_completion_anthropic = None
-    chat_completion_together = None
-    chat_completion_huggingface = None
-    chat_completion_huggingface_local = None
-    make_config = None
+from .arena_hard_utils import (
+    build_pairwise_judge_prompt as ah_build_pairwise_prompt,
+    extract_pairwise_from_judge_response as ah_extract_pairwise,
+    verdict_token_to_score as ah_token_to_score,
+)
 
 
 class JudgeQueryInterface:
@@ -241,36 +218,8 @@ class JudgeQueryInterface:
             os.unlink(config_path)
             
     def _query_openai_judge(self, context: Dict[str, Any], **kwargs) -> Dict[str, Any]:
-        """Query judge using OpenAI API via Arena-Hard Auto."""
-        if chat_completion_openai is None:
-            return self._fallback_openai_query(context, **kwargs)
-            
-        try:
-            prompt = self._format_judge_prompt(context)
-            
-            # Use Arena-Hard Auto's chat completion
-            response = chat_completion_openai(
-                model=self.judge_api_config['model_name'],
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0,
-                max_tokens=2048,
-                **kwargs
-            )
-            
-            if response == "$ERROR$":
-                raise RuntimeError("OpenAI API call failed")
-                
-            scores = self._parse_judge_response(response)
-            
-            return {
-                'raw_output': response,
-                'scores': scores,
-                'token_count': len(response.split()),  # Rough estimate
-                'api_type': 'openai'
-            }
-            
-        except Exception as e:
-            raise RuntimeError(f"OpenAI judge query failed: {e}")
+        """Query judge using OpenAI API (direct SDK fallback)."""
+        return self._fallback_openai_query(context, **kwargs)
             
     def _fallback_openai_query(self, context: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """Fallback OpenAI query using direct API call."""
@@ -309,95 +258,69 @@ class JudgeQueryInterface:
             raise RuntimeError(f"Fallback OpenAI query failed: {e}")
             
     def _query_anthropic_judge(self, context: Dict[str, Any], **kwargs) -> Dict[str, Any]:
-        """Query judge using Anthropic API via Arena-Hard Auto."""
+        """Query judge using Anthropic SDK directly."""
         try:
+            from anthropic import Anthropic
+            client = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+            if client.api_key is None:
+                raise RuntimeError("ANTHROPIC_API_KEY not found in environment")
             prompt = self._format_judge_prompt(context)
-            
-            response = chat_completion_anthropic(
+            msg = client.messages.create(
                 model=self.judge_api_config['model_name'],
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0,
                 max_tokens=2048,
-                **kwargs
+                temperature=0.0,
+                messages=[{"role": "user", "content": prompt}],
             )
-            
-            if response == "$ERROR$":
-                raise RuntimeError("Anthropic API call failed")
-                
-            scores = self._parse_judge_response(response)
-            
-            return {
-                'raw_output': response,
-                'scores': scores, 
-                'token_count': len(response.split()),
-                'api_type': 'anthropic'
-            }
-            
+            # Extract text
+            content = ''.join([blk.text for blk in msg.content if hasattr(blk, 'text')]) if hasattr(msg, 'content') else str(msg)
+            scores = self._parse_judge_response(content)
+            tok = getattr(msg, 'usage', None)
+            total_tokens = getattr(tok, 'input_tokens', 0) + getattr(tok, 'output_tokens', 0) if tok else len(content.split())
+            return { 'raw_output': content, 'scores': scores, 'token_count': total_tokens, 'api_type': 'anthropic' }
         except Exception as e:
             raise RuntimeError(f"Anthropic judge query failed: {e}")
             
     def _query_together_judge(self, context: Dict[str, Any], **kwargs) -> Dict[str, Any]:
-        """Query judge using Together API via Arena-Hard Auto."""
+        """Query judge using Together SDK directly."""
         try:
+            import together
+            together.api_key = os.getenv('TOGETHER_API_KEY')
+            if not together.api_key:
+                raise RuntimeError("TOGETHER_API_KEY not found in environment")
             prompt = self._format_judge_prompt(context)
-            
-            response = chat_completion_together(
+            resp = together.Chat.completions.create(
                 model=self.judge_api_config['model_name'],
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
                 max_tokens=2048,
-                **kwargs
             )
-            
-            if response == "$ERROR$":
-                raise RuntimeError("Together API call failed")
-                
-            scores = self._parse_judge_response(response)
-            
-            return {
-                'raw_output': response,
-                'scores': scores,
-                'token_count': len(response.split()),
-                'api_type': 'together'
-            }
-            
+            content = resp.choices[0].message.get('content', '') if hasattr(resp, 'choices') else str(resp)
+            scores = self._parse_judge_response(content)
+            return { 'raw_output': content, 'scores': scores, 'token_count': len(content.split()), 'api_type': 'together' }
         except Exception as e:
             raise RuntimeError(f"Together judge query failed: {e}")
             
     def _query_huggingface_judge(self, context: Dict[str, Any], **kwargs) -> Dict[str, Any]:
-        """Query judge using HuggingFace API via Arena-Hard Auto."""
+        """Query judge using HuggingFace Inference API directly (or local)."""
         try:
             prompt = self._format_judge_prompt(context)
-            
             if self.judge_api_config.get('api_type') == 'huggingface_local':
-                response = chat_completion_huggingface_local(
-                    model=self.judge_api_config['model_name'],
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.0,
-                    max_tokens=2048,
-                    **kwargs
-                )
-            else:
-                response = chat_completion_huggingface(
-                    model=self.judge_api_config['model_name'],
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.0,
-                    max_tokens=2048,
-                    **kwargs
-                )
-            
-            if response == "$ERROR$":
-                raise RuntimeError("HuggingFace API call failed")
-                
-            scores = self._parse_judge_response(response)
-            
-            return {
-                'raw_output': response,
-                'scores': scores,
-                'token_count': len(response.split()),
-                'api_type': 'huggingface'
-            }
-            
+                # Local inference not implemented here; prefer Oumi path
+                raise RuntimeError("Use api_type='oumi' for local GGUF models")
+            from huggingface_hub import InferenceClient
+            token = os.getenv('HUGGINGFACEHUB_API_TOKEN')
+            if not token:
+                raise RuntimeError("HUGGINGFACEHUB_API_TOKEN not found in environment")
+            client = InferenceClient(token=token)
+            resp = client.chat.completions.create(
+                model=self.judge_api_config['model_name'],
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=2048,
+            )
+            content = resp.choices[0].message.get('content', '')
+            scores = self._parse_judge_response(content)
+            return { 'raw_output': content, 'scores': scores, 'token_count': len(content.split()), 'api_type': 'huggingface' }
         except Exception as e:
             raise RuntimeError(f"HuggingFace judge query failed: {e}")
             
@@ -428,7 +351,16 @@ class JudgeQueryInterface:
         return base_config
         
     def _format_judge_prompt(self, context: Dict[str, Any]) -> str:
-        """Format the judge prompt using Arena-Hard template."""
+        """Format the judge prompt.
+
+        If pairwise answers are present (answer_a, answer_b), use the Arena-Hard
+        pairwise prompt from our local utils. Otherwise, fall back to judge config
+        template or a default single-answer template.
+        """
+        # Pairwise path
+        if 'answer_a' in context and 'answer_b' in context:
+            q = context.get('question', '')
+            return ah_build_pairwise_prompt(q, context.get('answer_a', ''), context.get('answer_b', ''))
         # Default template if judge config not available
         default_template = """Please act as an impartial judge and evaluate the quality of the response provided to the user question below. Your evaluation should consider factors such as helpfulness, relevance, accuracy, depth, creativity, and level of detail of the response. Begin your evaluation by providing a brief explanation of your reasoning. After providing your explanation, you must rate the response on a scale of 1 to 10 by strictly following this format: "[[rating]]", for example: "Rating: [[8]]".
 
@@ -474,12 +406,23 @@ class JudgeQueryInterface:
             )
         
     def _parse_judge_response(self, response: str) -> Dict[str, float]:
-        """Parse judge response to extract scores."""
+        """Parse judge response to extract scores.
+
+        Supports Arena-Hard pairwise tokens mapped to Likert [1..5] and numeric
+        ratings as fallbacks.
+        """
         scores = {}
-        
-        # Look for rating patterns
+        # First try Arena-Hard pairwise extraction
+        token = ah_extract_pairwise(response)
+        if token:
+            num = ah_token_to_score(token)
+            if num is not None:
+                scores['overall_score'] = float(num)
+                scores['pairwise_comparison'] = token
+                return scores
+
+        # Look for numeric rating patterns
         import re
-        
         # Pattern 1: [[rating]] format
         rating_match = re.search(r'\[\[(\d+(?:\.\d+)?)\]\]', response)
         if rating_match:
@@ -499,8 +442,7 @@ class JudgeQueryInterface:
                 
         # If no score found, default to neutral
         if 'overall_score' not in scores:
-            scores['overall_score'] = 5.0
-            
+            scores['overall_score'] = 3.0
         # Convert to 1-5 scale if needed (Arena-Hard uses 1-5)
         if scores['overall_score'] > 5:
             scores['overall_score'] = scores['overall_score'] / 2.0  # 10-scale to 5-scale

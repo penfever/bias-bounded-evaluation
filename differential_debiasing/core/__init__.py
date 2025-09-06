@@ -7,6 +7,8 @@ from .utils import (
     denormalize_judgments, 
     calculate_noise_parameter,
     calculate_abb_noise_parameter,
+    rms_from_differences,
+    context_adjusted_rms,
     validate_input_array,
     clip_to_range,
     check_bias_parameters
@@ -20,6 +22,8 @@ __all__ = [
     'denormalize_judgments',
     'calculate_noise_parameter',
     'calculate_abb_noise_parameter',
+    'rms_from_differences',
+    'context_adjusted_rms',
     'validate_input_array',
     'clip_to_range',
     'check_bias_parameters'

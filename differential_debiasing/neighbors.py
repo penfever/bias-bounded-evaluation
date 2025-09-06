@@ -244,6 +244,9 @@ class FormattingNeighborGenerator(BaseNeighborGenerator):
                  formatting_types: Optional[List[str]] = None,
                  single_field: bool = True,
                  disable_transforms: bool = False,
+                 oumi_config_path: Optional[str] = None,
+                 oumi_retries: int = 3,
+                 oumi_backoff_sec: float = 1.0,
                  **kwargs):
         """
         Initialize formatting neighbor generator.
@@ -266,6 +269,69 @@ class FormattingNeighborGenerator(BaseNeighborGenerator):
         self.formatting_types = formatting_types or ['whitespace', 'capitalization', 'punctuation']
         self.disable_transforms = disable_transforms
         self.single_field = single_field
+        # Oumi settings for rephrasing
+        self.oumi_config_path = oumi_config_path
+        self.oumi_retries = int(oumi_retries)
+        self.oumi_backoff_sec = float(oumi_backoff_sec)
+        self._oumi_engine = None
+
+    def _get_oumi_engine(self):
+        """Lazily build an Oumi inference engine for rephrasing."""
+        if self._oumi_engine is not None:
+            return self._oumi_engine
+        import os
+        cfg_path = self.oumi_config_path or os.getenv('OUMI_REPHRASE_CONFIG')
+        if not cfg_path:
+            raise RuntimeError("Oumi config path is required for rephrasing (set oumi_config_path or OUMI_REPHRASE_CONFIG)")
+        try:
+            from oumi.builders.inference_engines import build_inference_engine
+            from oumi.core.configs import InferenceConfig, ModelParams, GenerationParams, InferenceEngineType, RemoteParams
+            import yaml
+            from pathlib import Path
+            p = Path(cfg_path)
+            if not p.exists():
+                raise FileNotFoundError(f"Oumi config not found: {p}")
+            with open(p, 'r') as f:
+                cfg = yaml.safe_load(f)
+            engine_type = InferenceEngineType(cfg.get('engine', 'NATIVE'))
+            mc = cfg.get('model', {})
+            model_params = ModelParams(
+                model_name=mc.get('model_name'),
+                tokenizer_name=mc.get('tokenizer_name', mc.get('model_name')),
+                model_max_length=mc.get('model_max_length', 8192),
+                torch_dtype_str=mc.get('torch_dtype_str', 'float16'),
+                trust_remote_code=mc.get('trust_remote_code', True),
+                model_kwargs=mc.get('model_kwargs', {})
+            )
+            gc = cfg.get('generation', {})
+            self._oumi_generation_params = GenerationParams(
+                max_new_tokens=gc.get('max_new_tokens', 1024),
+                temperature=gc.get('temperature', 0.2),
+                top_p=gc.get('top_p', 0.9)
+            )
+            rc = cfg.get('remote', {})
+            api_key = rc.get('api_key')
+            if not api_key:
+                if engine_type.name == 'OPENAI':
+                    api_key = os.getenv('OPENAI_API_KEY')
+                elif engine_type.name == 'ANTHROPIC':
+                    api_key = os.getenv('ANTHROPIC_API_KEY')
+            remote_params = None
+            if engine_type.name in ['OPENAI', 'ANTHROPIC']:
+                remote_params = RemoteParams(
+                    api_key=api_key,
+                    num_workers=int(rc.get('num_workers', 4)),
+                    politeness_policy=float(rc.get('politeness_policy', 60.0))
+                )
+            self._oumi_engine = build_inference_engine(
+                engine_type=engine_type,
+                model_params=model_params,
+                generation_params=self._oumi_generation_params,
+                remote_params=remote_params
+            )
+            return self._oumi_engine
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize Oumi rephrase engine: {e}")
     
     def sample_neighbors(self, context: Union[Dict, pd.DataFrame], num_neighbors: int) -> List[Union[Dict, pd.DataFrame]]:
         """
@@ -437,8 +503,60 @@ class FormattingNeighborGenerator(BaseNeighborGenerator):
         
         return text
     
+    def _oumi_rephrase(self, text: str) -> str:
+        """Rephrase via Oumi with retries and strict length bounds."""
+        engine = self._get_oumi_engine()
+        from oumi.core.configs import InferenceConfig
+        from oumi.core.types.conversation import Conversation, Message, ContentItem, Type, Role
+        import time
+        prompt = (
+            "Make MINIMAL stylistic changes to the following text while preserving the exact same meaning. "
+            "Only small synonyms or light restructuring. Do NOT change technical terms, code, numbers, or key concepts. "
+            "Keep length and structure nearly the same.\n\nText to rephrase:\n{t}\n\nMinimally rephrased version:"
+        ).format(t=text)
+        attempt = 0
+        last_err = None
+        while True:
+            try:
+                inf_cfg = InferenceConfig(generation=self._oumi_generation_params,
+                                          model=getattr(engine, '_model_params', None))
+                if hasattr(engine, 'infer_online'):
+                    outs = engine.infer_online([Conversation(messages=[Message(role=Role.USER, content=prompt)])], inf_cfg)
+                else:
+                    conv = Conversation(messages=[Message(role=Role.USER, content=[ContentItem(type=Type.TEXT, content=prompt)])])
+                    outs = engine.infer(input=[conv])
+                if not outs:
+                    raise RuntimeError("Empty Oumi response")
+                oc = outs[0]
+                out_text = None
+                if hasattr(oc, 'messages') and oc.messages:
+                    for m in reversed(oc.messages):
+                        if getattr(m, 'role', None) == Role.ASSISTANT:
+                            if isinstance(m.content, str):
+                                out_text = m.content
+                            elif isinstance(m.content, list):
+                                out_text = m.compute_flattened_text_content()
+                            else:
+                                out_text = str(m.content)
+                            break
+                if out_text is None:
+                    out_text = str(oc)
+                rephrased = out_text.strip()
+                ratio = len(rephrased) / max(len(text), 1)
+                if 0.75 <= ratio <= 1.25:
+                    return rephrased
+                raise ValueError(f"Rephrase length ratio out of bounds: {ratio:.2f}")
+            except Exception as e:
+                last_err = e
+                attempt += 1
+                if attempt > max(1, self.oumi_retries):
+                    raise RuntimeError(f"Rephrasing failed after {self.oumi_retries} retries: {last_err}")
+                time.sleep(self.oumi_backoff_sec * (2 ** (attempt - 1)))
+
     def _rephrase_text(self, text: str) -> str:
         """Rephrase text using LLM while preserving functional utility and meaning."""
+        # Use Oumi-based rephrasing path
+        return self._oumi_rephrase(text)
         try:
             # Import here to avoid circular imports
             from openai import OpenAI
@@ -472,17 +590,15 @@ Minimally rephrased version:"""
             
             # Basic validation - ensure rephrasing isn't too different in length
             length_ratio = len(rephrased) / max(len(text), 1)
-            if 0.5 <= length_ratio <= 2.0:  # Allow 50%-200% length variation
+            if 0.75 <= length_ratio <= 1.25:  # Tight length validation: 75%-125%
                 return rephrased
             else:
-                # If rephrasing changes length too much, fall back to original
-                print(f"⚠️ Rephrasing length check failed: {len(text)} -> {len(rephrased)}")
-                return text
+                # If rephrasing changes length too much, raise to skip this neighbor
+                raise ValueError(f"Rephrasing length check failed: {len(text)} -> {len(rephrased)} (ratio={length_ratio:.2f})")
                 
         except Exception as e:
-            print(f"⚠️ Rephrasing failed: {e}")
-            # Fall back to minor text modifications
-            return self._apply_fallback_changes(text)
+            # Fail loudly; caller will skip this neighbor
+            raise RuntimeError(f"Rephrasing failed: {e}")
     
     def _apply_fallback_changes(self, text: str) -> str:
         """Apply minimal fallback changes when rephrasing fails."""
@@ -552,8 +668,8 @@ Minimally rephrased version:"""
         neighbors = []
         
         # Import Arena-Hard utilities from shared module (single source of truth)
-        from ..interfaces.arena_hard_utils import load_judgment_data as _load_judgment_data
-        from ..interfaces.arena_hard_utils import parse_arena_hard_prompt as _parse_arena_hard_prompt
+        from .interfaces.arena_hard_utils import load_judgment_data as _load_judgment_data
+        from .interfaces.arena_hard_utils import parse_arena_hard_prompt as _parse_arena_hard_prompt
         
         for _ in range(num_neighbors):
             neighbor_contexts = []
@@ -637,18 +753,9 @@ Minimally rephrased version:"""
         from pathlib import Path
         import json
         
-        # Import the Arena-Hard data loading functions
-        try:
-            from ..interfaces.oumi_interface import _load_judgment_data, _parse_arena_hard_prompt
-        except ImportError:
-            try:
-                from differential_debiasing.interfaces.oumi_interface import _load_judgment_data, _parse_arena_hard_prompt
-            except ImportError:
-                import sys
-                from pathlib import Path
-                parent_dir = Path(__file__).parent.parent
-                sys.path.insert(0, str(parent_dir))
-                from interfaces.oumi_interface import _load_judgment_data, _parse_arena_hard_prompt
+        # Import the Arena-Hard data loading functions from our local utils
+        from .interfaces.arena_hard_utils import load_judgment_data as _load_judgment_data
+        from .interfaces.arena_hard_utils import parse_arena_hard_prompt as _parse_arena_hard_prompt
         
         print(f"🔧 Creating {num_neighbors} single-sample perturbation experiments for {len(sampled_df)} samples...")
         
@@ -702,6 +809,7 @@ Minimally rephrased version:"""
             # Create neighbor dataset: all original samples + one perturbed sample
             neighbor_contexts = []
             
+            skip_experiment = False
             for i, question_id in enumerate(successful_samples):
                 original = original_data[question_id]
                 
@@ -716,12 +824,17 @@ Minimally rephrased version:"""
                     perturbed_answer_a = original['answer_a']
                     perturbed_answer_b = original['answer_b']
                     
-                    if 'question' in fields_to_modify:
-                        perturbed_question = self._apply_formatting_changes(original['question'])
-                    if 'answer_a' in fields_to_modify:
-                        perturbed_answer_a = self._apply_formatting_changes(original['answer_a'])
-                    if 'answer_b' in fields_to_modify:
-                        perturbed_answer_b = self._apply_formatting_changes(original['answer_b'])
+                    try:
+                        if 'question' in fields_to_modify:
+                            perturbed_question = self._apply_formatting_changes(original['question'])
+                        if 'answer_a' in fields_to_modify:
+                            perturbed_answer_a = self._apply_formatting_changes(original['answer_a'])
+                        if 'answer_b' in fields_to_modify:
+                            perturbed_answer_b = self._apply_formatting_changes(original['answer_b'])
+                    except Exception as e:
+                        print(f"⚠️ Skipping experiment {neighbor_idx} due to rephrasing error: {e}")
+                        skip_experiment = True
+                        break
                     
                     perturbed_context = {
                         'question': perturbed_question,
@@ -744,6 +857,8 @@ Minimally rephrased version:"""
                     unchanged_context['perturbed_sample_index'] = sample_to_perturb_idx
                     neighbor_contexts.append(unchanged_context)
             
+            if skip_experiment:
+                continue
             all_neighbors.append(neighbor_contexts)
         
         print(f"✅ Created {len(all_neighbors)} single-sample perturbation experiments")

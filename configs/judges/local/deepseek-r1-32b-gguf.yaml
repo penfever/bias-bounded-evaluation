@@ -1,6 +1,6 @@
 engine: LLAMACPP
 generation:
-  max_new_tokens: 2048
+  max_new_tokens: 4096
   temperature: 0.01
   top_p: 0.01
 model:
