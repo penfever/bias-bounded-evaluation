@@ -391,6 +391,8 @@ def main():
                         help="Number of neighbors to generate")
     parser.add_argument("--budget", "-b", type=float, default=10.0,
                         help="Cost budget in USD for API calls")
+    parser.add_argument("--oumi-retries", type=int, default=3,
+                        help="Number of retries for Oumi inference (default: 3)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would be measured without actually running")
     parser.add_argument("--reuse-baseline", action="store_true",
@@ -408,6 +410,7 @@ def main():
     print(f"Samples: {args.samples}")
     print(f"Neighbors: {args.neighbors}")
     print(f"Budget: ${args.budget}")
+    print(f"Oumi retries: {args.oumi_retries}")
     print(f"Reuse baseline: {'Yes' if args.reuse_baseline else 'No'}")
     print(f"Disable transforms: {'Yes' if args.disable_transforms else 'No'}")
     
