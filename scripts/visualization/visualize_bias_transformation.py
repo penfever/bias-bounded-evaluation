@@ -11,12 +11,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Union
 import re
 from scipy import stats
 from matplotlib.patches import Rectangle
 import warnings
 warnings.filterwarnings('ignore')
+
+# Import data loader utilities
+from data_loader import get_project_paths, load_judge_data_for_visualization
 
 def _pick_first_existing(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     for c in candidates:
@@ -24,8 +27,15 @@ def _pick_first_existing(df: pd.DataFrame, candidates: List[str]) -> Optional[st
             return c
     return None
 
-def load_ranking_data(rankings_dir: Path) -> Dict[str, pd.DataFrame]:
-    """Load all ranking CSV files from a directory."""
+def load_ranking_data(rankings_input: Union[Path, Dict[str, pd.DataFrame]]) -> Dict[str, pd.DataFrame]:
+    """Load all ranking CSV files from a directory or use provided DataFrames."""
+    
+    # If already a dict of DataFrames, return it
+    if isinstance(rankings_input, dict):
+        return rankings_input
+        
+    # Otherwise, load from directory
+    rankings_dir = Path(rankings_input)
     rankings: Dict[str, pd.DataFrame] = {}
     csv_files = list(rankings_dir.glob("*.csv"))
     
@@ -438,41 +448,136 @@ def create_summary_comparison(original_data: Dict[str, pd.DataFrame],
         plt.close()
         print(f"Saved summary comparison: {output_path}")
 
+def visualize_from_jsonl(judge_dir: Union[str, Path], output_dir: Union[str, Path], 
+                        metrics: Optional[List[str]] = None):
+    """Create visualizations directly from JSONL data."""
+    judge_dir = Path(judge_dir)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    print(f"Loading data from {judge_dir}...")
+    
+    # Load judge data from JSONL files
+    judge_data = load_judge_data_for_visualization(judge_dir)
+    
+    if judge_data['original'].empty or judge_data['debiased'].empty:
+        print("Error: Missing original or debiased data")
+        return 1
+    
+    # Create data dictionaries for visualization functions
+    original_data = {'score': judge_data['original']}
+    debiased_data = {'score': judge_data['debiased']}
+    
+    # Add factor-specific dataframes if available
+    agg_df = judge_data.get('aggregated', pd.DataFrame())
+    if not agg_df.empty:
+        factor_cols = ['correctness_score', 'completeness_score', 'safety_score', 
+                      'conciseness_score', 'style_score']
+        
+        for factor in factor_cols:
+            if factor in agg_df.columns:
+                # Create factor-specific rankings
+                from data_loader import create_ranking_dataframe
+                original_data[factor] = create_ranking_dataframe(agg_df, factor, 'original')
+                if 'score_debiased' in agg_df.columns:
+                    debiased_data[factor] = create_ranking_dataframe(agg_df, 'score_debiased', 'debiased')
+                    # Add original scores for comparison
+                    debiased_data[factor]['original_score'] = agg_df.loc[debiased_data[factor].index, factor]
+    
+    # Process metrics
+    if metrics:
+        metrics_to_process = set(metrics) & set(original_data.keys())
+    else:
+        metrics_to_process = set(original_data.keys()) & set(debiased_data.keys())
+    
+    print(f"Processing metrics: {sorted(metrics_to_process)}")
+    
+    # Create visualizations
+    for metric in sorted(metrics_to_process):
+        print(f"\nCreating plots for {metric}...")
+        
+        # Line plot with confidence intervals
+        line_plot_path = output_dir / f"line_comparison_{metric}.png"
+        create_line_plot_comparison(original_data, debiased_data, metric, line_plot_path)
+        
+        # Critical difference plot
+        cd_plot_path = output_dir / f"critical_difference_{metric}.png"
+        create_critical_difference_plot(original_data, debiased_data, metric, cd_plot_path)
+    
+    # Create summary comparison
+    print("\nCreating summary comparison...")
+    summary_path = output_dir / "summary_comparison.png"
+    create_summary_comparison(original_data, debiased_data, summary_path)
+    
+    print(f"\nAll plots saved to: {output_dir}")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Visualize transformation from biased to debiased judge rankings',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # From CSV directories (legacy):
   python visualize_bias_transformation.py \\
     --original "/path/to/original/factor_scores_updated_cis" \\
     --debiased "/path/to/debiased/tables/factor_scores_updated_cis"
+    
+  # From JSONL data (new):
+  python visualize_bias_transformation.py \\
+    --judge-dir "/path/to/judge/directory" \\
+    --output-dir "./visualizations"
         """
     )
     
-    parser.add_argument('--original', required=True, type=str,
-                       help='Path to original rankings directory')
-    parser.add_argument('--debiased', required=True, type=str, 
-                       help='Path to debiased rankings directory')
-    parser.add_argument('--output-dir', type=str, default='.',
-                       help='Output directory for plots (default: current directory)')
+    # Legacy arguments
+    parser.add_argument('--original', type=str,
+                       help='Path to original rankings directory (CSV mode)')
+    parser.add_argument('--debiased', type=str, 
+                       help='Path to debiased rankings directory (CSV mode)')
+    
+    # New arguments for JSONL mode
+    parser.add_argument('--judge-dir', type=str,
+                       help='Path to judge directory with base_processed and base_debiased (JSONL mode)')
+    
+    parser.add_argument('--output-dir', type=str,
+                       help='Output directory for plots')
     parser.add_argument('--metrics', type=str, nargs='*',
                        help='Specific metrics to plot (default: all available)')
     
     args = parser.parse_args()
     
-    # Convert paths
-    original_path = Path(args.original)
-    debiased_path = Path(args.debiased)
-    output_dir = Path(args.output_dir)
-    
-    # Validate paths
-    if not original_path.exists():
-        print(f"Error: Original path does not exist: {original_path}")
-        sys.exit(1)
+    # Determine mode and validate arguments
+    if args.judge_dir:
+        # JSONL mode
+        if not args.output_dir:
+            paths = get_project_paths()
+            args.output_dir = paths['figures'] / 'bias_transformation'
         
-    if not debiased_path.exists():
-        print(f"Error: Debiased path does not exist: {debiased_path}")
+        return visualize_from_jsonl(args.judge_dir, args.output_dir, args.metrics)
+    
+    elif args.original and args.debiased:
+        # Legacy CSV mode
+        if not args.output_dir:
+            args.output_dir = '.'
+    
+        # Convert paths
+        original_path = Path(args.original)
+        debiased_path = Path(args.debiased)
+        output_dir = Path(args.output_dir)
+        
+        # Validate paths
+        if not original_path.exists():
+            print(f"Error: Original path does not exist: {original_path}")
+            sys.exit(1)
+            
+        if not debiased_path.exists():
+            print(f"Error: Debiased path does not exist: {debiased_path}")
+            sys.exit(1)
+    else:
+        print("Error: Please specify either --judge-dir (for JSONL) or both --original and --debiased (for CSV)")
+        parser.print_help()
         sys.exit(1)
     
     # Create output directory

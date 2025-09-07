@@ -15,6 +15,14 @@ from typing import Dict, List, Tuple
 import warnings
 warnings.filterwarnings('ignore')
 
+# Import the new data loader
+from data_loader import (
+    get_project_paths, 
+    load_judge_data_for_visualization,
+    create_ranking_dataframe,
+    aggregate_scores_by_model
+)
+
 def load_combined_abb_results(results_file: Path) -> Dict:
     """Load Combined A-BB analysis results."""
     with open(results_file, 'r', encoding='utf-8') as f:
@@ -81,61 +89,79 @@ def generate_standard_models_list(n_models: int) -> List[str]:
     
     return models
 
-def save_rankings_for_judge(judge_name: str, judge_results: Dict, output_base_path: Path):
-    """Save ranking CSV files for a specific judge's Combined A-BB results."""
+def save_rankings_for_judge_from_jsonl(judge_name: str, output_base_path: Path, strategies: List[str] = None):
+    """Save ranking CSV files for a specific judge using JSONL data."""
     
     print(f"\nProcessing rankings for {judge_name}...")
     
-    if 'approaches' not in judge_results:
-        print(f"No approaches found for {judge_name}")
+    # Default strategies if not provided
+    if strategies is None:
+        strategies = ['conservative', 'rms', 'weighted', 'montecarlo', 'formatting_only']
+    
+    # Load judge data from JSONL files
+    judge_dir = output_base_path / judge_name
+    if not judge_dir.exists():
+        print(f"Judge directory not found: {judge_dir}")
+        return
+        
+    # Load the data
+    try:
+        judge_data = load_judge_data_for_visualization(judge_dir)
+    except Exception as e:
+        print(f"Error loading judge data: {e}")
         return
     
-    # Create output directories for each approach
-    for approach_name, approach_result in judge_results['approaches'].items():
-        if not approach_result.get('success', False):
-            print(f"Skipping failed approach: {approach_name}")
-            continue
+    if not judge_data['debiased'].empty:
+        # We have debiased data - create ranking files for each strategy
+        for strategy in strategies:
+            clean_approach = strategy
+            print(f"  Processing {clean_approach} strategy...")
             
-        clean_approach = approach_name.replace('combined_abb_', '')
-        print(f"  Processing {clean_approach} strategy...")
-        
-        # Create directory structure similar to existing debiased approaches
-        approach_dir = output_base_path / judge_name / f"tables_debiased_{clean_approach}"
-        ranking_dir = approach_dir / "tables" / "factor_scores_updated_cis"
-        ranking_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Get scores
-        original_scores = approach_result['original_scores']
-        debiased_scores = approach_result['debiased_scores']
-        n_samples = len(original_scores)
-        
-        # Generate consistent model names
-        models = generate_standard_models_list(n_samples)
-        
-        # Create ranking data
-        ranking_df = create_ranking_data(original_scores, debiased_scores, models, clean_approach)
-        
-        # Save ranking CSV in the expected format
-        output_filename = f"arena_hard_leaderboard_20250119_{judge_name}_judge_gpt-4-0314_base_score_factor_{clean_approach}.csv"
-        output_path = ranking_dir / output_filename
-        
-        ranking_df.to_csv(output_path, index=False)
-        print(f"    Saved: {output_path}")
-        
-        # Also create factor-specific files for completeness (using same data)
-        factor_types = ['correctness', 'completeness', 'safety', 'conciseness', 'style']
-        for factor in factor_types:
-            factor_filename = f"arena_hard_leaderboard_20250119_{judge_name}_judge_gpt-4-0314_base_{factor}_score_factor_{clean_approach}.csv"
-            factor_path = ranking_dir / factor_filename
+            # Create directory structure
+            approach_dir = judge_dir / f"tables_debiased_{clean_approach}"
+            ranking_dir = approach_dir / "tables" / "factor_scores_updated_cis"
+            ranking_dir.mkdir(parents=True, exist_ok=True)
             
-            # Create slight variations for different factors (small noise added)
-            factor_df = ranking_df.copy()
-            np.random.seed(hash(factor) % 2147483647)  # Consistent seed per factor
-            noise = np.random.normal(0, 0.1, len(factor_df))
-            factor_df['score'] = factor_df['score'] + noise
-            factor_df = factor_df.sort_values('score', ascending=False).reset_index(drop=True)
+            # Get aggregated data
+            agg_df = judge_data['aggregated']
             
-            factor_df.to_csv(factor_path, index=False)
+            # Create ranking DataFrames for each score type
+            score_types = {
+                'score': 'overall_score',
+                'correctness_score': 'correctness_score',
+                'completeness_score': 'completeness_score',
+                'safety_score': 'safety_score',
+                'conciseness_score': 'conciseness_score',
+                'style_score': 'style_score'
+            }
+            
+            for score_name, col_name in score_types.items():
+                # Use debiased scores
+                if col_name in agg_df.columns and 'score_debiased' in agg_df.columns:
+                    # Create ranking with debiased scores
+                    ranking_df = create_ranking_dataframe(agg_df, 'score_debiased', clean_approach)
+                    
+                    # Add original scores for comparison
+                    if col_name in agg_df.columns:
+                        ranking_df['original_score'] = agg_df.loc[ranking_df.index, col_name]
+                    
+                    # Generate filename
+                    factor_part = f"_{score_name.replace('_score', '')}" if score_name != 'score' else ""
+                    filename = f"arena_hard_leaderboard_20250119_{judge_name}_judge_gpt-4-0314_base{factor_part}_score_factor_{clean_approach}.csv"
+                    output_path = ranking_dir / filename
+                    
+                    ranking_df.to_csv(output_path, index=False)
+                    print(f"    Saved: {output_path.name}")
+    else:
+        print(f"  No debiased data found for {judge_name}")
+
+
+def save_rankings_for_judge(judge_name: str, judge_results: Dict, output_base_path: Path):
+    """Save ranking CSV files for a specific judge's Combined A-BB results (legacy support)."""
+    
+    # This function is kept for backward compatibility but now uses the JSONL data
+    # Instead of using the results dict, we load from JSONL files
+    save_rankings_for_judge_from_jsonl(judge_name, output_base_path)
 
 def main():
     """Main function to generate ranking CSV files for Combined A-BB strategies."""
@@ -143,24 +169,40 @@ def main():
     print("🚀 Generating Combined A-BB Ranking CSV Files")
     print("=" * 60)
     
-    # Load Combined A-BB results
-    results_file = Path("/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/sos-addl-data/InDepthAnalysis/combined_abb_analysis_results.json")
+    # Get project paths
+    paths = get_project_paths()
+    data_base_path = paths['data_base']
     
-    if not results_file.exists():
-        print(f"Error: Results file not found: {results_file}")
+    # Find judge directories with debiased data
+    judge_patterns = [
+        "QwQ-32B-setting1",
+        "DeepSeek-R1-32B-setting1", 
+        "DeepSeek-R1-32B-setting2",
+        "DeepSeek-R1-32B-setting3",
+        "GPT-3.5-Turbo-0125-setting1",
+        "GPT-4o-mini-0718-setting1"
+    ]
+    
+    found_judges = []
+    for judge_name in judge_patterns:
+        judge_dir = data_base_path / judge_name
+        if judge_dir.exists():
+            # Check for any base_debiased* directories
+            debiased_dirs = list(judge_dir.glob('base_debiased*'))
+            if debiased_dirs:
+                found_judges.append(judge_name)
+                print(f"✅ Found judge with debiased data: {judge_name}")
+    
+    if not found_judges:
+        print("❌ No judges with debiased data found!")
         return 1
     
-    print("📊 Loading Combined A-BB analysis results...")
-    results = load_combined_abb_results(results_file)
-    print(f"✅ Loaded results for {len(results)} judges")
-    
-    # Output base path
-    output_base_path = Path("/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/sos-addl-data/InDepthAnalysis")
+    print(f"\n📊 Found {len(found_judges)} judges to process")
     
     # Process each judge
-    for judge_name, judge_results in results.items():
+    for judge_name in found_judges:
         try:
-            save_rankings_for_judge(judge_name, judge_results, output_base_path)
+            save_rankings_for_judge_from_jsonl(judge_name, data_base_path)
             print(f"✅ Completed rankings for {judge_name}")
             
         except Exception as e:
@@ -171,9 +213,10 @@ def main():
     
     # Count generated files
     total_files = 0
-    for judge_name in results.keys():
-        for strategy in ['conservative', 'rms', 'weighted']:
-            ranking_dir = output_base_path / judge_name / f"tables_debiased_{strategy}" / "tables" / "factor_scores_updated_cis"
+    strategies = ['conservative', 'rms', 'weighted', 'montecarlo', 'formatting_only']
+    for judge_name in found_judges:
+        for strategy in strategies:
+            ranking_dir = data_base_path / judge_name / f"tables_debiased_{strategy}" / "tables" / "factor_scores_updated_cis"
             if ranking_dir.exists():
                 files = list(ranking_dir.glob("*.csv"))
                 total_files += len(files)

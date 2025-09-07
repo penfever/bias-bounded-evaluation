@@ -247,6 +247,71 @@ def robust_htmt_ratio(factor1_scores, factor2_scores, debug=False):
             print("Warning: Need at least 2 items per factor to calculate HTMT ratio")
         return 0.5  # Fallback to neutral value
     
+    # Fast vectorized path with pairwise-overlap handling
+    try:
+        n_items1 = factor1_scores.shape[1]
+        n_items2 = factor2_scores.shape[1]
+        rng = np.random.RandomState(42)
+        jitter = 1e-6
+        X1 = factor1_scores.astype(np.float64).copy()
+        X2 = factor2_scores.astype(np.float64).copy()
+        M1 = ~np.isnan(X1)
+        M2 = ~np.isnan(X2)
+        # Add tiny noise only to valid entries to break degeneracies
+        X1[M1] += rng.normal(0.0, jitter, size=M1.sum())
+        X2[M2] += rng.normal(0.0, jitter, size=M2.sum())
+
+        # Column means/std with NaN-safe ops
+        mu1 = np.nanmean(X1, axis=0, keepdims=True)
+        mu2 = np.nanmean(X2, axis=0, keepdims=True)
+        sd1 = np.nanstd(X1, axis=0, ddof=1, keepdims=True)
+        sd2 = np.nanstd(X2, axis=0, ddof=1, keepdims=True)
+        sd1 = np.where(sd1 < 1e-12, 1.0, sd1)
+        sd2 = np.where(sd2 < 1e-12, 1.0, sd2)
+
+        # Impute NaNs with column means then z-score
+        X1_imp = np.where(np.isnan(X1), mu1, X1)
+        X2_imp = np.where(np.isnan(X2), mu2, X2)
+        Z1 = (X1_imp - mu1) / sd1
+        Z2 = (X2_imp - mu2) / sd2
+
+        # Pairwise overlap counts
+        N1 = M1.astype(np.int64).T @ M1.astype(np.int64)
+        N2 = M2.astype(np.int64).T @ M2.astype(np.int64)
+        N12 = M1.astype(np.int64).T @ M2.astype(np.int64)
+
+        # Sum of standardized products (equivalent to covariance sums)
+        G1 = Z1.T @ Z1
+        G2 = Z2.T @ Z2
+        G12 = Z1.T @ Z2
+
+        eps = 1e-8
+        C1 = G1 / np.maximum(N1 - 1, eps)
+        C2 = G2 / np.maximum(N2 - 1, eps)
+        C12 = G12 / np.maximum(N12 - 1, eps)
+
+        # Mask insufficient overlaps
+        mask_within1 = N1 >= 3
+        mask_within2 = N2 >= 3
+        mask_between = N12 >= 3
+
+        iu1 = np.triu_indices(n_items1, k=1)
+        iu2 = np.triu_indices(n_items2, k=1)
+        within1_vals = np.abs(C1[iu1])[mask_within1[iu1]]
+        within2_vals = np.abs(C2[iu2])[mask_within2[iu2]]
+        between_vals = np.abs(C12[mask_between])
+
+        within1_mean = float(np.mean(within1_vals)) if within1_vals.size > 0 else 0.5
+        within2_mean = float(np.mean(within2_vals)) if within2_vals.size > 0 else 0.5
+        between_mean = float(np.mean(between_vals)) if between_vals.size > 0 else 0.5
+
+        denom = np.sqrt(max(within1_mean, eps) * max(within2_mean, eps))
+        if denom <= eps:
+            return 0.5
+        return between_mean / denom
+    except Exception:
+        pass
+
     try:
         # Get dimensions
         n_models = min(factor1_scores.shape[0], factor2_scores.shape[0])

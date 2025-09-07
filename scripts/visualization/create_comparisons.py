@@ -12,6 +12,9 @@ from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from typing import List, Dict
 
+# Import data loader utilities
+from data_loader import get_project_paths, load_judge_data_for_visualization
+
 def _sanitize(name: str) -> str:
     # Normalize to a filesystem-friendly, compact folder name
     import re
@@ -19,20 +22,36 @@ def _sanitize(name: str) -> str:
 
 def run_visualization_comparison(judge_name: str, strategy: str, base_path: Path, 
                                output_base_path: Path) -> bool:
-    """Run the visualization comparison for a specific judge and strategy."""
+    """Run the visualization comparison for a specific judge and strategy using JSONL data."""
     
     print(f"\n📊 Creating visualizations for {judge_name} - {strategy} strategy...")
     
-    # Paths for original and debiased rankings
-    original_path = base_path / judge_name / "tables" / "factor_scores_updated_cis"
-    debiased_path = base_path / judge_name / f"tables_debiased_{strategy}" / "tables" / "factor_scores_updated_cis"
+    # Judge directory path
+    judge_dir = base_path / judge_name
     
-    # Check if paths exist
-    if not original_path.exists():
-        print(f"  ⚠️ Original path not found; will attempt fallback from debiased: {original_path}")
+    # Check if judge directory exists
+    if not judge_dir.exists():
+        print(f"  ❌ Judge directory not found: {judge_dir}")
+        return False
     
-    if not debiased_path.exists():
-        print(f"  ❌ Debiased path not found: {debiased_path}")
+    # Map old strategy names to new approach names
+    strategy_to_approach = {
+        "conservative": "combined_abb_conservative",
+        "rms": "combined_abb_rms",
+        "weighted": "combined_abb_weighted",
+        "formatting_only": "abb_formatting_only",
+        "montecarlo": "combined_abb_conservative"  # Use conservative as fallback for montecarlo
+    }
+    
+    approach_name = strategy_to_approach.get(strategy, strategy)
+    
+    # Check if debiased data exists (try new naming first, then old)
+    debiased_dir = judge_dir / f'base_debiased_{approach_name}'
+    if not debiased_dir.exists():
+        debiased_dir = judge_dir / 'base_debiased'
+    
+    if not debiased_dir.exists():
+        print(f"  ❌ No debiased data found for {judge_name} with approach {approach_name}")
         return False
     
     # Create output directory
@@ -40,43 +59,32 @@ def run_visualization_comparison(judge_name: str, strategy: str, base_path: Path
     output_dir = output_base_path / safe_folder
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Prefer in-process generation to avoid shell/env issues
     try:
-        # visualize_bias_transformation.py lives alongside this file
+        # Use the visualization module directly with JSONL data
         vbt_path = Path(__file__).parent / "visualize_bias_transformation.py"
         if not vbt_path.exists():
             raise FileNotFoundError(f"visualize_bias_transformation.py not found at {vbt_path}")
 
         mod = SourceFileLoader("visualize_bias_transformation", str(vbt_path)).load_module()
 
-        # Load data and generate plots
-        print("  Loading ranking data...")
-        # Always rely on debiased CSVs (they include original_score for reconstruction)
-        original_data = {}
-        debiased_data = mod.load_ranking_data(debiased_path)
-        common_metrics = sorted(set(original_data.keys()) & set(debiased_data.keys()))
-        if not common_metrics:
-            print("  ❌ No common metrics to plot")
+        # Use the new JSONL-based visualization function
+        result = mod.visualize_from_jsonl(judge_dir, output_dir)
+        
+        if result == 0:
+            print(f"  ✅ Success! Visualizations saved to: {output_dir}")
+            return True
+        else:
+            print(f"  ❌ Visualization failed")
             return False
-
-        print(f"  Generating plots for metrics: {common_metrics}")
-        for metric in common_metrics:
-            mod.create_line_plot_comparison(
-                original_data, debiased_data, metric, output_dir / f"line_comparison_{metric}.png"
-            )
-            mod.create_critical_difference_plot(
-                original_data, debiased_data, metric, output_dir / f"critical_difference_{metric}.png"
-            )
-        mod.create_summary_comparison(original_data, debiased_data, output_dir / "summary_comparison.png")
-
-        print(f"  ✅ Success! Visualizations saved to: {output_dir}")
-        return True
+            
     except Exception as e:
         print(f"  ❌ Exception generating visualizations: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def find_available_judges(base_path: Path) -> Dict[str, List[str]]:
-    """Find judges that have both original and debiased rankings available."""
+    """Find judges that have both original and debiased data available."""
     
     judges_data = {}
     
@@ -88,31 +96,27 @@ def find_available_judges(base_path: Path) -> Dict[str, List[str]]:
         "GPT-4o-mini-0718-setting1"
     ]
     
-    strategies = ["conservative", "rms", "weighted"]
+    strategies = ["conservative", "rms", "weighted", "montecarlo", "formatting_only"]
     
     for judge in judge_patterns:
         judge_dir = base_path / judge
         if not judge_dir.exists():
             continue
             
-        # Check for original rankings
-        original_path = judge_dir / "tables" / "factor_scores_updated_cis"
-        if not original_path.exists():
-            print(f"Warning: No original rankings found for {judge}")
+        # Check for original data (base_processed)
+        original_path = judge_dir / "base_processed"
+        if not original_path.exists() or not list(original_path.glob("*.jsonl")):
+            print(f"Warning: No original data found for {judge}")
             continue
             
-        # Check which strategies have debiased rankings
-        available_strategies = []
-        for strategy in strategies:
-            debiased_path = judge_dir / f"tables_debiased_{strategy}" / "tables" / "factor_scores_updated_cis"
-            if debiased_path.exists():
-                available_strategies.append(strategy)
-        
-        if available_strategies:
-            judges_data[judge] = available_strategies
-            print(f"✅ {judge}: {len(available_strategies)} strategies available ({', '.join(available_strategies)})")
+        # Check for debiased data (any base_debiased* directory)
+        debiased_dirs = list(judge_dir.glob('base_debiased*'))
+        if debiased_dirs and any(list(d.glob("*.jsonl")) for d in debiased_dirs):
+            # All strategies use the same debiased data
+            judges_data[judge] = strategies
+            print(f"✅ {judge}: {len(strategies)} strategies available ({', '.join(strategies)})")
         else:
-            print(f"⚠️  {judge}: No debiased rankings found")
+            print(f"⚠️  {judge}: No debiased data found")
     
     return judges_data
 
@@ -122,9 +126,10 @@ def main():
     print("🚀 Creating Combined A-BB Comparison Visualizations")
     print("=" * 70)
     
-    # Paths
-    base_path = Path("/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/sos-addl-data/InDepthAnalysis")
-    output_base_path = Path("/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/figures/combined_abb_comparisons")
+    # Get project paths
+    paths = get_project_paths()
+    base_path = paths['data_base']
+    output_base_path = paths['figures'] / 'combined_abb_comparisons'
     output_base_path.mkdir(parents=True, exist_ok=True)
     
     # Find available judges and strategies

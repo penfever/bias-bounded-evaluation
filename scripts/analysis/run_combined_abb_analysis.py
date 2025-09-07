@@ -166,11 +166,12 @@ def extract_scores_from_evaluations(evaluations: Dict[str, List[Dict]]) -> pd.Da
             question_id = eval_data.get('question_id', '')
             games = eval_data.get('games', [])
             
-            for game in games:
+            for game_idx, game in enumerate(games):
                 # Initialize score data
                 score_data = {
                     'model': model_name,
                     'question_id': question_id,
+                    'game_index': game_idx,
                 }
                 
                 # Extract scores for each factor using the actual game data
@@ -448,9 +449,18 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                 'fixed_sensitivity_value': None,
             }
         },
+        'abb_formatting_only': {
+            'estimator': estimator_type,
+            'tau': 0.5,
+            'delta': 0.05,
+            'use_average_case': True,
+            'extra_params': {
+                'fixed_sensitivity_value': None,
+            }
+        },
         'combined_abb_montecarlo': {
             'estimator': estimator_type,
-            'tau': 1.5,
+            'tau': 2.25,
             'delta': 0.1,
             'use_average_case': True,
             'extra_params': {
@@ -490,11 +500,17 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
             init_params.update(approach_config['extra_params'])
 
             # Compute combined fixed sensitivity for this approach
+            # Add a slight perturbation to avoid exact zeros leading to no-op (TODO: revisit handling of zero ctx)
+            _eps = 1e-3
+            _fmt = ctx if ctx > 0 else _eps
+            _psy = psych_ctx if psych_ctx > 0 else _eps
+            _sch = schem_ctx if schem_ctx > 0 else _eps
+
             if approach_name == 'combined_abb_conservative':
-                combined_fixed = float(max(ctx, psych_ctx, schem_ctx))
+                combined_fixed = float(max(_fmt, _psy, _sch))
             elif approach_name == 'combined_abb_rms':
                 import numpy as _np
-                combined_fixed = float(_np.sqrt(_np.mean(_np.square([ctx, psych_ctx, schem_ctx]))))
+                combined_fixed = float(_np.sqrt(_np.mean(_np.square([_fmt, _psy, _sch]))))
             elif approach_name == 'combined_abb_montecarlo':
                 import numpy as _np
                 w = approach_config['extra_params'].get('mc_weights', {}) or {}
@@ -508,13 +524,15 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                 w_fmt /= total_w
                 w_psy /= total_w
                 w_sch /= total_w
-                v_fmt = ctx * ctx
-                v_psy = psych_ctx * psych_ctx
-                v_sch = schem_ctx * schem_ctx
+                v_fmt = _fmt * _fmt
+                v_psy = _psy * _psy
+                v_sch = _sch * _sch
                 combined_fixed = float(_np.sqrt(w_fmt * v_fmt + w_psy * v_psy + w_sch * v_sch))
                 print(f"    MC weights: formatting={w_fmt:.3f}, psychometric={w_psy:.3f}, schematic={w_sch:.3f}")
+            elif approach_name == 'abb_formatting_only':
+                combined_fixed = float(_fmt)
             else:  # weighted: default equal weights
-                combined_fixed = float((ctx + psych_ctx + schem_ctx) / 3.0)
+                combined_fixed = float((_fmt + _psy + _sch) / 3.0)
 
             # No-op: if combined sensitivity is non-positive, skip mechanism and return original
             original_scores = df['overall_score'].values
@@ -607,7 +625,7 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                 'strategy': approach_name,
                 'original_scores': [float(x) for x in original_scores.tolist()],
                 'debiased_scores': [float(x) for x in debiased_scores.tolist()],
-                'model_question_data': list(zip(df['model'].tolist(), df['question_id'].tolist(), debiased_scores.tolist())),
+                'model_question_data': list(zip(df['model'].tolist(), df['question_id'].tolist(), df['game_index'].tolist(), debiased_scores.tolist())),
                 'diagnostics': {
                     'bias_sensitivity': float(diagnostics.get('bias_sensitivity', combined_fixed)) if isinstance(diagnostics, dict) else combined_fixed,
                     'combined_sensitivity': float(diagnostics.get('abb_constraint_validation', {}).get('combined_sensitivity', combined_fixed)) if isinstance(diagnostics, dict) else combined_fixed,
@@ -748,8 +766,8 @@ def save_debiased_scores(base_path: Path, judge_name: str, approach_results: Dic
     for approach_name, approach_data in approach_results.items():
         if approach_data.get('success', False):
             # Create directory for this setting and approach
-            # e.g., "sos-addl-data/InDepthAnalysis/DeepSeek-R1-32B-setting1/base_debiased"
-            debiased_dir = base_path / judge_name / "base_debiased"
+            # e.g., "sos-addl-data/InDepthAnalysis/DeepSeek-R1-32B-setting1/base_debiased_combined_abb_conservative"
+            debiased_dir = base_path / judge_name / f"base_debiased_{approach_name}"
             debiased_dir.mkdir(parents=True, exist_ok=True)
             
             # Extract model-question-score data
@@ -758,9 +776,10 @@ def save_debiased_scores(base_path: Path, judge_name: str, approach_results: Dic
             # Group by model
             from collections import defaultdict
             model_scores = defaultdict(list)
-            for model, question_id, score in model_question_data:
+            for model, question_id, game_idx, score in model_question_data:
                 model_scores[model].append({
                     "question_id": question_id,
+                    "game": game_idx,
                     "score_debiased": float(score)
                 })
             
@@ -787,10 +806,6 @@ def save_debiased_scores(base_path: Path, judge_name: str, approach_results: Dic
                 json.dump(metadata, f, indent=2, ensure_ascii=False)
             
             print(f"  📝 Saved metadata for {approach_name} to {metadata_file}")
-            
-            # For now, only save the first successful approach
-            # (you can modify this to save all approaches in separate subdirectories if needed)
-            break
 
 def main(args):
     """Main execution function."""
