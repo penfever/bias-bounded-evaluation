@@ -391,6 +391,45 @@ class SensitivityProfileManager:
         prof = self.load_intrinsic_profile_for_dataset(judge_name, dataset_id)
         return prof.get_intrinsic_sensitivity() if prof else None
 
+    def find_any_intrinsic_profile_for_judge(self, judge_name: str) -> Optional[Tuple[str, SensitivityProfile]]:
+        """
+        Find an intrinsic profile for a judge across any dataset subdirectory.
+
+        Returns a tuple of (dataset_id, profile) if found, else None.
+        """
+        if not self.profile_dir.exists():
+            return None
+        candidates: List[Tuple[str, Path]] = []
+        for dataset_dir in self.profile_dir.iterdir():
+            if dataset_dir.is_dir():
+                f = dataset_dir / f"{judge_name}_intrinsic_profile.json"
+                if f.exists():
+                    candidates.append((dataset_dir.name, f))
+        if not candidates:
+            return None
+        # Prefer the one with the most recent created_date if present
+        latest: Optional[Tuple[str, SensitivityProfile, float]] = None
+        for ds, path in candidates:
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                prof = SensitivityProfile(data)
+                # Parse created_date if present, else use 0
+                created = data.get('created_date')
+                ts = 0.0
+                if created:
+                    try:
+                        ts = datetime.fromisoformat(created.replace('Z', '+00:00')).timestamp()
+                    except Exception:
+                        ts = 0.0
+                if latest is None or ts > latest[2]:
+                    latest = (ds, prof, ts)
+            except Exception:
+                continue
+        if latest is None:
+            return None
+        return (latest[0], latest[1])
+
 
 # Convenience functions for common operations
 

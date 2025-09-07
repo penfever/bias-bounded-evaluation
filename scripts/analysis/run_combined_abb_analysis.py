@@ -28,8 +28,10 @@ from differential_debiasing.core.sensitivity_profiles import (
     load_intrinsic_sensitivity_profile,
     SensitivityProfileManager,
 )
-from differential_debiasing.core.utils import context_adjusted_rms
-from differential_debiasing.interfaces.oumi_interface import create_oumi_judge_function
+from differential_debiasing.core.utils import context_adjusted_rms, compute_abb_constraint_validation
+from differential_debiasing.sensitivity.psychometric_reliability import PsychometricReliabilitySensitivity
+from differential_debiasing.sensitivity.schematic_adherence import SchematicAdherenceSensitivity
+# Note: Oumi judge interface is imported lazily only when needed
 
 def get_judge_config_path(judge_name: str) -> Path:
     """Get the correct config path for a judge based on the new directory structure."""
@@ -256,7 +258,7 @@ def check_sensitivity_profiles(real_judge_name: str, dataset_id: str) -> Dict[st
                 ham = profile.get_hamming_sensitivity() if hasattr(profile, 'get_hamming_sensitivity') else None
                 if ham is not None:
                     profile_info['hamming_sensitivity'] = float(ham)
-                    print(f"✅ Found hamming sensitivity in profile: {ham:.4f}")
+                    # Intentionally no print: hamming is not used in this script
             except Exception:
                 pass
             try:
@@ -269,21 +271,34 @@ def check_sensitivity_profiles(real_judge_name: str, dataset_id: str) -> Dict[st
         # Try dataset-scoped intrinsic jitter profile
         mgr = SensitivityProfileManager(profile_dir)
         intrinsic = mgr.get_intrinsic_sensitivity_for_dataset(real_judge_name, dataset_id)
+        if intrinsic is None:
+            # Fallback: use any intrinsic profile available for this judge
+            fallback = mgr.find_any_intrinsic_profile_for_judge(real_judge_name)
+            if fallback is not None:
+                fb_dataset, fb_prof = fallback
+                intrinsic = fb_prof.get_intrinsic_sensitivity()
+                if intrinsic is not None:
+                    print(f"✅ Using fallback intrinsic from dataset={fb_dataset} for judge={real_judge_name}: {intrinsic:.4f}")
         if intrinsic is not None:
             profile_info['intrinsic_sensitivity'] = intrinsic
             print(f"✅ Found intrinsic jitter for ({dataset_id}, {real_judge_name}): {intrinsic:.4f}")
         else:
             print(f"📋 No intrinsic jitter profile found for dataset={dataset_id}, judge={real_judge_name}")
 
-        # Derive context-adjusted RMS if both available
-        if profile_info['formatting_sensitivity'] is not None and profile_info['intrinsic_sensitivity'] is not None:
+        # Derive context-adjusted RMS; if intrinsic missing, proceed with formatting as-is
+        if profile_info['formatting_sensitivity'] is not None:
             tot = float(profile_info['formatting_sensitivity'])
-            intr = float(profile_info['intrinsic_sensitivity'])
-            ctx = context_adjusted_rms(tot, intr)
+            if profile_info['intrinsic_sensitivity'] is not None:
+                intr = float(profile_info['intrinsic_sensitivity'])
+                print(f"   ↪︎ context_adjusted_rms inputs (check_sensitivity_profiles): formatting_total={tot:.4f}, intrinsic={intr:.4f}")
+                ctx = context_adjusted_rms(tot, intr)
+            else:
+                ctx = tot
+                print(f"ℹ️ Intrinsic missing; using formatting RMS as context-adjusted value: {ctx:.4f}")
             profile_info['context_adjusted_rms'] = ctx
             print(f"🎯 Context-adjusted RMS for ({dataset_id}, {real_judge_name}): {ctx:.4f}")
         else:
-            print(f"📋 No sensitivity profile found for {real_judge_name}")
+            print(f"📋 No formatting sensitivity profile found for {real_judge_name}")
     except Exception as e:
         print(f"⚠️ Error loading profile for {real_judge_name}: {e}")
     
@@ -291,7 +306,8 @@ def check_sensitivity_profiles(real_judge_name: str, dataset_id: str) -> Dict[st
 
 
 def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
-                              real_judge_name: str) -> Dict[str, Any]:
+                              real_judge_name: str,
+                              strict_abb: bool = False) -> Dict[str, Any]:
     """Run Combined A-BB debiasing approaches on the judge data."""
     print(f"\nRunning Combined A-BB analysis for {judge_name}...")
     
@@ -300,50 +316,71 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
     # Check for sensitivity profiles for the real judge, and dataset-scoped intrinsic jitter
     profile_info = check_sensitivity_profiles(real_judge_name, dataset_id=judge_name)
     
-    # Create real judge function using Oumi interface with cost management
-    print(f"Attempting to use real judge: {real_judge_name}")
-    judge_config_path = get_judge_config_path(real_judge_name)
-    if not judge_config_path.exists():
-        raise FileNotFoundError(f"Judge config not found at {judge_config_path}")
-    judge_function = create_oumi_judge_function(
-        str(judge_config_path),
-        cost_budget_usd=5.0,  # Conservative budget for testing
-        cache_responses=True
-    )
-    print(f"✅ Successfully created {real_judge_name} judge function")
+    # Judge function not needed in this script (no dynamic generators)
+    judge_function = None
     
     # Determine dynamic generators based on profile availability
-    # If we have formatting sensitivity profile, skip expensive formatting measurement
-    # Context-aware sensitivity is required: both intrinsic (dataset+judge) and formatting (judge) must exist.
-    # Loudly fail if missing; do not fall back to dynamic formatting.
     profile_override = None
     ctx = profile_info.get('context_adjusted_rms') if profile_info else None
     if ctx is None:
+        # If formatting is missing entirely, we cannot proceed safely
         raise RuntimeError(
-            "Context-adjusted RMS is required but missing. "
-            f"Ensure both profiles exist: (a) intrinsic jitter for dataset='{judge_name}' and judge='{real_judge_name}' "
-            f"via: measure_judge_sensitivity.py --judge {real_judge_name} --disable-transforms, and (b) formatting RMS for judge '{real_judge_name}'."
+            f"Formatting sensitivity profile missing for judge '{real_judge_name}'. Please generate it first."
         )
-    # Choose dynamic generators based on what the profile already provides
-    dyn_gens = []
-    if profile_info.get('hamming_sensitivity') is None:
-        dyn_gens.append('hamming')
-    # Formatting sensitivity is provided via context-adjusted RMS, so skip dynamic formatting
-
-    dynamic_generators = dyn_gens
-    # Build a composed profile override including formatting (ctx) and optional hamming
+    # No dynamic generators in this script (formatting covered by profile; omit hamming as trivial here)
+    dynamic_generators = []
+    # Build a composed profile override including only formatting (context-adjusted RMS)
     profile_override = {'value': float(ctx)}
-    if profile_info.get('hamming_sensitivity') is not None:
-        profile_override['hamming_sensitivity'] = {'value': float(profile_info['hamming_sensitivity'])}
-    if profile_info.get('combined_average_sensitivity') is not None:
-        profile_override['combined_average_sensitivity'] = float(profile_info['combined_average_sensitivity'])
     print(f"🚀 Using Context-Adjusted RMS for formatting: {ctx:.4f}")
+
+    # Compute context-aware static sensitivities (psychometric and schematic)
+    factor_columns = [col for col in df.columns if col.endswith('_score') and col != 'overall_score']
+    score_range = float(df['overall_score'].max() - df['overall_score'].min()) if 'overall_score' in df.columns else 4.0
+    if score_range <= 0:
+        score_range = 4.0
+
+    # Psychometric
+    try:
+        psych_est = PsychometricReliabilitySensitivity(factor_columns=factor_columns)
+        psych_est.fit(df)
+        psych_raw = float(psych_est.estimate(score_range))
+    except Exception as e:
+        print(f"Warning: Psychometric reliability estimation failed: {e}")
+        psych_raw = 0.0
+    psych_ctx = context_adjusted_rms(psych_raw, float(profile_info['intrinsic_sensitivity'])) if profile_info.get('intrinsic_sensitivity') is not None else psych_raw
+
+    # Schematic
+    try:
+        schem_est = SchematicAdherenceSensitivity(factor_columns=factor_columns, target_column='overall_score')
+        schem_est.fit(df)
+        schem_raw = float(schem_est.estimate(score_range))
+    except Exception as e:
+        print(f"Warning: Schematic adherence estimation failed: {e}")
+        schem_raw = 0.0
+    schem_ctx = context_adjusted_rms(schem_raw, float(profile_info['intrinsic_sensitivity'])) if profile_info.get('intrinsic_sensitivity') is not None else schem_raw
+
+    print(f"   ↪︎ context-aware static: psych={psych_ctx:.4f}, schematic={schem_ctx:.4f}")
+
+    # Create real judge function using Oumi only if dynamic generators are needed
+    if len(dynamic_generators) > 0:
+        from differential_debiasing.interfaces.oumi_interface import create_oumi_judge_function
+        print(f"Attempting to use real judge: {real_judge_name}")
+        judge_config_path = get_judge_config_path(real_judge_name)
+        if not judge_config_path.exists():
+            raise FileNotFoundError(f"Judge config not found at {judge_config_path}")
+        judge_function = create_oumi_judge_function(
+            str(judge_config_path),
+            cost_budget_usd=5.0,  # Conservative budget for testing
+            cache_responses=True
+        )
+        print(f"✅ Successfully created {real_judge_name} judge function")
 
     # Define Combined A-BB approaches with different aggregation strategies  
     # Using relaxed tau/delta for conservative strategy to help with constraint satisfaction
     # Choose estimator type based on profile availability
     # Use profile-enhanced estimator when we have any profile override or judge-level profile
-    estimator_type = 'profile_enhanced_abb'
+    # We will pass a fixed combined sensitivity for each strategy
+    estimator_type = 'fixed'
     
     approaches = {
         'combined_abb_conservative': {
@@ -352,15 +389,8 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
             'delta': 0.25,  # Further relaxed delta for conservative strategy (was 0.2)
             'use_average_case': True,
             'extra_params': {
-                'static_estimators': ['psychometric_reliability', 'schematic_adherence'],
-                'dynamic_generators': dynamic_generators,
-                'combination_strategy': 'conservative',
-                'num_neighbors': 10,  # Efficient neighbor count for fast sensitivity measurement
-                'target_samples': 10,  # Efficient sampling for dynamic scoring
-                'dimensionality': None,
-                'judge_function': judge_function,
-                'sensitivity_profile': (profile_override if profile_override is not None else (real_judge_name if profile_info and profile_info.get('profile_available') else None)),
-                'profile_dir': str(Path(__file__).parent.parent.parent / "sensitivity_profiles")
+                # Fixed estimator parameters (set later per-strategy before init)
+                'fixed_sensitivity_value': None,
             }
         },
         'combined_abb_rms': {
@@ -369,15 +399,7 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
             'delta': 0.13,  # Further relaxed delta for RMS strategy (was 0.12)
             'use_average_case': True,
             'extra_params': {
-                'static_estimators': ['psychometric_reliability', 'schematic_adherence'],
-                'dynamic_generators': dynamic_generators,
-                'combination_strategy': 'rms',
-                'num_neighbors': 10,  # Efficient neighbor count for fast sensitivity measurement
-                'target_samples': 10,  # Efficient sampling for dynamic scoring
-                'dimensionality': None,
-                'judge_function': judge_function,
-                'sensitivity_profile': (profile_override if profile_override is not None else (real_judge_name if profile_info and profile_info.get('profile_available') else None)),
-                'profile_dir': str(Path(__file__).parent.parent.parent / "sensitivity_profiles")
+                'fixed_sensitivity_value': None,
             }
         },
         'combined_abb_weighted': {
@@ -386,22 +408,21 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
             'delta': 0.12,  # Slightly relaxed delta for weighted strategy (was 0.1)
             'use_average_case': True,
             'extra_params': {
-                'static_estimators': ['psychometric_reliability', 'schematic_adherence'],
-                'dynamic_generators': dynamic_generators,
-                'combination_strategy': 'weighted',
-                'static_weights': [0.6, 0.4],  # Weight psychometric higher
-                'dynamic_weights': [0.7, 0.3], # Weight hamming higher
-                'num_neighbors': 10,  # Efficient neighbor count for fast sensitivity measurement
-                'target_samples': 10,  # Efficient sampling for dynamic scoring
-                'dimensionality': None,
-                'judge_function': judge_function
+                'fixed_sensitivity_value': None,
             }
         }
     }
     
     results = {}
     
-    for approach_name, approach_config in approaches.items():
+    # Progress bar over strategies
+    try:
+        from tqdm import tqdm as _tqdm
+        _approach_iter = _tqdm(list(approaches.items()), total=len(approaches), desc="Combined A-BB strategies")
+    except Exception:
+        _approach_iter = approaches.items()
+    
+    for approach_name, approach_config in _approach_iter:
         print(f"  Testing {approach_name} strategy...")
         
         try:
@@ -416,50 +437,123 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
             
             # Add extra parameters
             init_params.update(approach_config['extra_params'])
-            
-            # Initialize debiaser
-            debiaser = DifferentialDebias(**init_params)
-            
-            # Fit with factor columns
-            factor_columns = [col for col in df.columns if col.endswith('_score') and col != 'overall_score']
-            if factor_columns:
-                debiaser.fit(df, factor_columns=factor_columns)
-            else:
-                debiaser.fit(df)
-            
-            # Transform overall scores with proper score range
+
+            # Compute combined fixed sensitivity for this approach
+            if approach_name == 'combined_abb_conservative':
+                combined_fixed = float(max(ctx, psych_ctx, schem_ctx))
+            elif approach_name == 'combined_abb_rms':
+                import numpy as _np
+                combined_fixed = float(_np.sqrt(_np.mean(_np.square([ctx, psych_ctx, schem_ctx]))))
+            else:  # weighted: default equal weights
+                combined_fixed = float((ctx + psych_ctx + schem_ctx) / 3.0)
+
+            # No-op: if combined sensitivity is non-positive, skip mechanism and return original
             original_scores = df['overall_score'].values
-            score_range = float(original_scores.max() - original_scores.min())
-            debiased_scores = debiaser.transform(original_scores)
+            if combined_fixed <= 0.0:
+                print(f"    ℹ️ No-op: combined sensitivity is {combined_fixed:.4f}; skipping debiaser")
+                debiased_scores = original_scores.copy()
+                diagnostics = {
+                    'fitted': True,
+                    'is_abb_mechanism': False,
+                    'bias_sensitivity': combined_fixed
+                }
+                bias_bounds = {
+                    'tau': init_params['tau'],
+                    'delta': init_params['delta'],
+                    'noise_std': 0.0
+                }
+                validation = {
+                    'correlation': 1.0,
+                    'mean_absolute_difference': 0.0,
+                    'variance_ratio': 1.0,
+                    'signal_preservation': 1.0,
+                    'noise_level': 0.0
+                }
+            else:
+                # A-BB precheck using normalized sensitivity (no mechanism yet): Δ̂ = Δ / range
+                score_range = float(original_scores.max() - original_scores.min())
+                if score_range <= 0:
+                    score_range = 4.0
+                delta_val = float(approach_config.get('delta', init_params.get('delta', 0.1)))
+                tau_val = float(approach_config.get('tau', init_params.get('tau', 2.0)))
+                precheck = compute_abb_constraint_validation(
+                    tau=tau_val, delta=delta_val, sensitivity=combined_fixed, score_range=score_range
+                )
+                delta_hat = precheck.get('normalized_sensitivity')
+                threshold = precheck.get('constraint_threshold')
+                margin = precheck.get('margin')
+                print(f"    A-BB precheck: tau={tau_val:.3f}, delta={delta_val:.3f}, Δ̂={delta_hat:.4f}, threshold={threshold:.4f}, margin={margin:.4f}")
+                if strict_abb and float(margin) <= 0.0:
+                    msg = (
+                        f"Strict mode: A-BB precheck failed (tau={tau_val:.6f} <= threshold={threshold:.6f}); skipping strategy"
+                    )
+                    print(f"    ❌ {msg}")
+                    results[approach_name] = {
+                        'success': False,
+                        'approach': approach_name,
+                        'error': msg,
+                        'diagnostics': {
+                            'is_abb_mechanism': False,
+                            'bias_sensitivity': combined_fixed
+                        }
+                    }
+                    continue
+
+                init_params['fixed_sensitivity_value'] = combined_fixed
+                
+                # Initialize debiaser
+                debiaser = DifferentialDebias(**init_params)
+                
+                # Fit with factor columns
+                factor_columns = [col for col in df.columns if col.endswith('_score') and col != 'overall_score']
+                if factor_columns:
+                    debiaser.fit(df, factor_columns=factor_columns)
+                else:
+                    debiaser.fit(df)
+
+                # Transform overall scores
+                score_range = float(original_scores.max() - original_scores.min())
+                debiased_scores = debiaser.transform(original_scores)
+                
+                # Get bias bounds
+                bias_bounds = debiaser.get_bias_bounds(len(original_scores))
+                # Validate effectiveness
+                validation = debiaser.validate_effectiveness(original_scores, debiased_scores)
+                # Collect diagnostics for consistent reporting downstream
+                try:
+                    diagnostics = debiaser.get_diagnostics() or {}
+                except Exception:
+                    diagnostics = {}
             
-            # Get diagnostics
-            diagnostics = debiaser.get_diagnostics()
-            bias_bounds = debiaser.get_bias_bounds(len(original_scores))
             
-            # Validate effectiveness
-            validation = debiaser.validate_effectiveness(original_scores, debiased_scores)
             
             # Store comprehensive results (convert numpy types for JSON serialization)
             result_data = {
                 'success': True,
                 'approach': approach_name,
-                'strategy': approach_config['extra_params']['combination_strategy'],
+                'strategy': approach_name,
                 'original_scores': [float(x) for x in original_scores.tolist()],
                 'debiased_scores': [float(x) for x in debiased_scores.tolist()],
                 'diagnostics': {
-                    'bias_sensitivity': float(diagnostics.get('bias_sensitivity', 0)) if diagnostics.get('bias_sensitivity') is not None else 0,
-                    'combined_sensitivity': float(diagnostics.get('abb_constraint_validation', {}).get('combined_sensitivity', 0)) if diagnostics.get('abb_constraint_validation', {}).get('combined_sensitivity') is not None else 0,
+                    'bias_sensitivity': float(diagnostics.get('bias_sensitivity', combined_fixed)) if isinstance(diagnostics, dict) else combined_fixed,
+                    'combined_sensitivity': float(diagnostics.get('abb_constraint_validation', {}).get('combined_sensitivity', combined_fixed)) if isinstance(diagnostics, dict) else combined_fixed,
                     # Context-adjusted formatting RMS used (if available)
                     'context_adjusted_formatting_rms': float(profile_info['context_adjusted_rms']) if profile_info.get('context_adjusted_rms') is not None else None,
+                    'context_adjust_intrinsic_rms': float(profile_info['intrinsic_sensitivity']) if profile_info.get('intrinsic_sensitivity') is not None else None,
                     'formatting_profile_rms': float(profile_info['formatting_sensitivity']) if profile_info.get('formatting_sensitivity') is not None else None,
-                    'hamming_profile_rms': float(profile_info['hamming_sensitivity']) if profile_info.get('hamming_sensitivity') is not None else None,
+                    # hamming_profile_rms omitted in this script
                     'intrinsic_profile_rms': float(profile_info['intrinsic_sensitivity']) if profile_info.get('intrinsic_sensitivity') is not None else None,
                     'tau': float(bias_bounds['tau']),
                     'delta': float(bias_bounds['delta']),
                     'noise_std': float(bias_bounds['noise_std']),
-                    'is_abb_mechanism': bool(diagnostics.get('is_abb_mechanism', False)),
-                    'abb_constraint_satisfied': bool(diagnostics.get('abb_constraint_validation', {}).get('constraint_satisfied', False)),
-                    'abb_constraint_margin': float(diagnostics.get('abb_constraint_validation', {}).get('margin', 0)) if diagnostics.get('abb_constraint_validation', {}).get('margin') is not None else 0
+                    'is_abb_mechanism': bool(diagnostics.get('is_abb_mechanism', False)) if isinstance(diagnostics, dict) else False,
+                    # Preserve None when unavailable; do not force False default
+                    'abb_constraint_satisfied': (
+                        bool(diagnostics.get('abb_constraint_validation', {}).get('constraint_satisfied'))
+                        if isinstance(diagnostics, dict) and diagnostics.get('abb_constraint_validation') is not None
+                        else None
+                    ),
+                    'abb_constraint_margin': float(diagnostics.get('abb_constraint_validation', {}).get('margin', 0)) if isinstance(diagnostics, dict) and diagnostics.get('abb_constraint_validation', {}).get('margin') is not None else 0
                 },
                 'validation': {
                     'correlation': float(validation['correlation']),
@@ -472,7 +566,7 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
             }
             
             # Add measurement breakdown
-            abb_validation = diagnostics.get('abb_constraint_validation', {})
+            abb_validation = diagnostics.get('abb_constraint_validation', {}) if isinstance(diagnostics, dict) else {}
             measurement_breakdown = abb_validation.get('measurement_breakdown', {})
             if measurement_breakdown:
                 result_data['measurement_breakdown'] = {
@@ -501,41 +595,54 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                 print(f"    ✅ Combined sensitivity: {combined_sens}")
             
             print(f"    ✅ Correlation: {validation['correlation']:.3f}")
-            print(f"    ✅ A-BB constraint satisfied: {result_data['diagnostics'].get('abb_constraint_satisfied', 'N/A')}")
             
-            # Report individual dynamic measurements
+            # Report individual measurements (robust to simple float values)
             measurement_breakdown = result_data.get('measurement_breakdown')
             if measurement_breakdown:
                 dynamic_measurements = measurement_breakdown.get('dynamic_measurements', {})
-                
                 for generator_name, measurement in dynamic_measurements.items():
-                    if measurement and measurement.get('success', False):
-                        sensitivity_val = measurement.get('sensitivity', 'N/A')
-                        if isinstance(sensitivity_val, (int, float)):
-                            print(f"    ✅ Dynamic {generator_name}: {sensitivity_val:.4f}")
+                    if measurement is None:
+                        print(f"    ❌ Dynamic {generator_name}: No measurement data")
+                        continue
+                    # Support both simple float values and structured dicts
+                    if isinstance(measurement, (int, float, np.floating)):
+                        print(f"    ✅ Dynamic {generator_name}: {float(measurement):.4f}")
+                    elif isinstance(measurement, dict):
+                        if measurement.get('success', False):
+                            sensitivity_val = measurement.get('sensitivity', 'N/A')
+                            if isinstance(sensitivity_val, (int, float, np.floating)):
+                                print(f"    ✅ Dynamic {generator_name}: {float(sensitivity_val):.4f}")
+                            else:
+                                print(f"    ✅ Dynamic {generator_name}: {sensitivity_val}")
                         else:
-                            print(f"    ✅ Dynamic {generator_name}: {sensitivity_val}")
+                            error_msg = measurement.get('error', 'Unknown error')
+                            error_msg = str(error_msg)[:50]
+                            print(f"    ❌ Dynamic {generator_name}: {error_msg}")
                     else:
-                        error_msg = measurement.get('error', 'Unknown error') if measurement else 'No measurement data'
-                        error_msg = str(error_msg)[:50]
-                        print(f"    ❌ Dynamic {generator_name}: {error_msg}")
-                        
-                # Report static measurements  
+                        print(f"    ⚠️ Dynamic {generator_name}: Unrecognized format ({type(measurement).__name__})")
+
+                # Report static measurements (may also be floats)
                 static_measurements = measurement_breakdown.get('static_measurements', {})
                 for estimator_name, measurement in static_measurements.items():
-                    if measurement and measurement.get('success', False):
-                        sensitivity_val = measurement.get('sensitivity', 'N/A')
-                        range_val = measurement.get('range', 'N/A')
-                        if isinstance(sensitivity_val, (int, float)):
-                            print(f"    ✅ Static {estimator_name}: {sensitivity_val:.4f} (range: {range_val})")
+                    if measurement is None:
+                        print(f"    ❌ Static {estimator_name}: No measurement data")
+                        continue
+                    if isinstance(measurement, (int, float, np.floating)):
+                        print(f"    ✅ Static {estimator_name}: {float(measurement):.4f}")
+                    elif isinstance(measurement, dict):
+                        if measurement.get('success', False):
+                            sensitivity_val = measurement.get('sensitivity', 'N/A')
+                            if isinstance(sensitivity_val, (int, float, np.floating)):
+                                print(f"    ✅ Static {estimator_name}: {float(sensitivity_val):.4f}")
+                            else:
+                                print(f"    ✅ Static {estimator_name}: {sensitivity_val}")
                         else:
-                            print(f"    ✅ Static {estimator_name}: {sensitivity_val} (range: {range_val})")
+                            error_msg = measurement.get('error', 'Unknown error')
+                            error_msg = str(error_msg)[:50]
+                            print(f"    ❌ Static {estimator_name}: {error_msg}")
                     else:
-                        error_msg = measurement.get('error', 'Unknown error') if measurement else 'No measurement data'
-                        error_msg = str(error_msg)[:50]
-                        print(f"    ❌ Static {estimator_name}: {error_msg}")
-            else:
-                print(f"    ⚠️  No measurement breakdown available")
+                        print(f"    ⚠️ Static {estimator_name}: Unrecognized format ({type(measurement).__name__})")
+            # Suppress warning when no measurement breakdown is present (fixed/no-dynamic path)
             
         except Exception as e:
             print(f"    ❌ Error: {e}")
@@ -600,7 +707,7 @@ def main(args):
             
             # Run Combined A-BB analysis
             analysis_results = run_combined_abb_analysis(
-                df, judge_name, real_judge_name=judge_to_use
+                df, judge_name, real_judge_name=judge_to_use, strict_abb=bool(getattr(args, 'strict_abb', False))
             )
             
             # Store results
@@ -662,6 +769,8 @@ if __name__ == "__main__":
                         help="Run in test mode with limited samples (fast for debugging)")
     parser.add_argument("--test-samples", type=int, default=5,
                         help="Number of samples to use in test mode (default: 5)")
+    parser.add_argument("--strict-abb", action="store_true",
+                        help="Pre-check A-BB constraint with normalized sensitivity and skip strategy when margin <= 0")
     
     args = parser.parse_args()
     

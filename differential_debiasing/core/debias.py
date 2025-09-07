@@ -8,7 +8,7 @@ import warnings
 from typing import Union, Optional, Dict, Any, List
 from .utils import (
     normalize_judgments, denormalize_judgments, calculate_noise_parameter, calculate_abb_noise_parameter,
-    validate_input_array, clip_to_range, check_bias_parameters
+    validate_input_array, clip_to_range, check_bias_parameters, compute_abb_constraint_validation
 )
 from .sensitivity_profiles import SensitivityProfile, SensitivityProfileManager, get_formatting_sensitivity
 from ..sensitivity.base import SensitivityEstimator
@@ -22,6 +22,7 @@ from ..sensitivity.abb_sensitivity import ABBSensitivity
 from ..sensitivity.combined_abb_sensitivity import CombinedABBSensitivity
 from ..sensitivity.profile_enhanced_abb import ProfileEnhancedABBSensitivity
 from ..sensitivity.conformal_sensitivity import ConformalSensitivityEstimator
+from ..sensitivity.fixed import FixedSensitivityEstimator
 from ..sensitivity.conformal_bbe_unified import ConformedBiasBoundedPredictor
 
 
@@ -137,6 +138,7 @@ class DifferentialDebias:
             "profile_enhanced_abb": ProfileEnhancedABBSensitivity,
             "conformal_sensitivity": ConformalSensitivityEstimator,
             "cp_bbe_unified": ConformedBiasBoundedPredictor,
+            "fixed": FixedSensitivityEstimator,
         }
         
         if estimator not in estimator_map:
@@ -291,7 +293,7 @@ class DifferentialDebias:
         normalized_judgments, _, _ = normalize_judgments(judgments, score_min, score_max)
         
         # Calculate noise parameter - use A-BB formula if ABB estimator
-        if isinstance(self.sensitivity_estimator, (ABBSensitivity, CombinedABBSensitivity)):
+        if isinstance(self.sensitivity_estimator, (ABBSensitivity, CombinedABBSensitivity, FixedSensitivityEstimator)):
             # A-BB mechanism
             # Infer dimensionality if not provided
             if self.dimensionality is None:
@@ -305,10 +307,8 @@ class DifferentialDebias:
             )
             
             # Generate multivariate Gaussian noise
-            noise = self.rng.multivariate_normal(
-                mean=np.zeros(len(judgments)),
-                cov=sigma**2 * np.eye(len(judgments))
-            )
+            # Since covariance is diagonal (σ² I), sample i.i.d. normals for efficiency
+            noise = self.rng.normal(loc=0.0, scale=sigma, size=len(judgments))
         else:
             # Original mechanism
             n_samples = len(judgments)
@@ -382,7 +382,7 @@ class DifferentialDebias:
             raise ValueError("Must call fit() before getting bias bounds")
         
         # Calculate sigma for this sample size - use A-BB formula if ABB estimator
-        if isinstance(self.sensitivity_estimator, (ABBSensitivity, CombinedABBSensitivity)):
+        if isinstance(self.sensitivity_estimator, (ABBSensitivity, CombinedABBSensitivity, FixedSensitivityEstimator)):
             # A-BB mechanism
             dimensionality = self.dimensionality if self.dimensionality is not None else n_samples
             sigma = calculate_abb_noise_parameter(
@@ -430,7 +430,7 @@ class DifferentialDebias:
             "use_average_case": self.use_average_case,
             "random_seed": self.random_seed,
             "dimensionality": self.dimensionality,
-            "is_abb_mechanism": isinstance(self.sensitivity_estimator, (ABBSensitivity, CombinedABBSensitivity)),
+            "is_abb_mechanism": isinstance(self.sensitivity_estimator, (ABBSensitivity, CombinedABBSensitivity, FixedSensitivityEstimator)),
         }
         
         if self._fitted:
@@ -441,10 +441,14 @@ class DifferentialDebias:
                 "sensitivity_estimator": self.sensitivity_estimator.get_diagnostics()
             })
             
-            # Add A-BB specific diagnostics
-            if isinstance(self.sensitivity_estimator, (ABBSensitivity, CombinedABBSensitivity)):
-                abb_validation = self.sensitivity_estimator.validate_abb_constraint(self.tau, self.delta)
-                diagnostics["abb_constraint_validation"] = abb_validation
+            # Add A-BB specific diagnostics (normalized check to match mechanism math)
+            if isinstance(self.sensitivity_estimator, (ABBSensitivity, CombinedABBSensitivity, FixedSensitivityEstimator)):
+                diagnostics["abb_constraint_validation"] = compute_abb_constraint_validation(
+                    tau=self.tau,
+                    delta=self.delta,
+                    sensitivity=float(self._bias_sensitivity),
+                    score_range=float(self._original_range) if self._original_range is not None else None,
+                )
         
         return diagnostics
     

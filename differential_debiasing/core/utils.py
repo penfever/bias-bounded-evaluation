@@ -289,7 +289,66 @@ def context_adjusted_rms(total_rms: float, intrinsic_rms: float) -> float:
     """
     if total_rms is None or intrinsic_rms is None:
         raise ValueError("total_rms and intrinsic_rms must be provided")
-    return float(np.sqrt(max(0.0, float(total_rms) ** 2 - float(intrinsic_rms) ** 2)))
+    total = float(total_rms)
+    intrinsic = float(intrinsic_rms)
+    result = float(np.sqrt(max(0.0, total ** 2 - intrinsic ** 2)))
+    # Optional debug logging of call-site and inputs
+    try:
+        import os as _os
+        dbg = _os.getenv('A_BB_CONTEXT_RMS_DEBUG', '').strip().lower() in ('1', 'true', 'yes')
+        if dbg:
+            import inspect as _inspect
+            fr = _inspect.stack()[1]
+            caller_fn = getattr(fr, 'function', 'unknown')
+            caller_file = getattr(fr, 'filename', 'unknown')
+            caller_file = caller_file.split('/')[-1]
+            print(
+                f"🔎 context_adjusted_rms from {caller_file}:{caller_fn} | total={total:.4f}, intrinsic={intrinsic:.4f}, result={result:.4f}"
+            )
+    except Exception:
+        # Never let debug logging break computation
+        pass
+    return result
+
+
+def compute_abb_constraint_validation(tau: float,
+                                      delta: float,
+                                      sensitivity: float,
+                                      score_range: Optional[float] = None,
+                                      label: str = 'Δ*₂(f,D)') -> dict:
+    """
+    Compute A-BB constraint validation.
+
+    If score_range is provided and > 0, sensitivity is normalized by score_range
+    before applying the threshold; the returned dict includes both the raw
+    sensitivity (combined_sensitivity) and the normalized value used for the
+    check.
+    """
+    tau = float(tau)
+    delta = float(delta)
+    sensitivity = float(sensitivity)
+    rng = float(score_range) if score_range is not None else None
+
+    if rng is not None and rng > 0:
+        normalized = sensitivity / rng
+        threshold = normalized * float(np.sqrt(2.0 / delta))
+        formula = 'τ > Δ̂ * sqrt(2/δ)'
+    else:
+        normalized = None
+        threshold = sensitivity * float(np.sqrt(2.0 / delta))
+        formula = f'τ > {label} * sqrt(2/δ)'
+
+    return {
+        'constraint_satisfied': bool(tau > threshold),
+        'tau': tau,
+        'delta': delta,
+        'combined_sensitivity': sensitivity,
+        'normalized_sensitivity': float(normalized) if normalized is not None else None,
+        'constraint_threshold': float(threshold),
+        'margin': float(tau - threshold),
+        'score_range': float(rng) if rng is not None else None,
+        'constraint_formula': formula,
+    }
 
 
 def estimate_r_squared_from_scores(df: pd.DataFrame, 

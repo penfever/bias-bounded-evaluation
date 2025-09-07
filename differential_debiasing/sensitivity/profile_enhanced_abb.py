@@ -150,6 +150,8 @@ class MockProfileEstimator:
         """
         self.sensitivity_value = float(sensitivity_value)
         self._fitted = True
+        # Marker so upstream can avoid double context-adjustment
+        self.is_profile_based = True
     
     def estimate(self, score_range: Optional[float] = None) -> float:
         """Return the pre-computed sensitivity value."""

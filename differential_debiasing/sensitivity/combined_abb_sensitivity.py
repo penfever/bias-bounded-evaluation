@@ -15,6 +15,7 @@ from .psychometric_reliability import PsychometricReliabilitySensitivity
 from .schematic_adherence import SchematicAdherenceSensitivity
 from .combined import CombinedSensitivity
 from ..neighbors import BaseNeighborGenerator, HammingNeighborGenerator, FormattingNeighborGenerator, OrderNeighborGenerator
+from ..core.utils import compute_abb_constraint_validation
 
 
 class CombinedABBSensitivity(SensitivityEstimator):
@@ -37,6 +38,8 @@ class CombinedABBSensitivity(SensitivityEstimator):
                  dynamic_weights: Optional[List[float]] = None,
                  judge_function: Optional[Callable] = None,
                  num_neighbors: int = 10,
+                 # Optional: context-adjust all RMS-like estimates by removing intrinsic jitter RMS
+                 context_adjust_intrinsic_rms: Optional[float] = None,
                  **kwargs):
         """
         Initialize combined A-BB sensitivity estimator.
@@ -81,6 +84,8 @@ class CombinedABBSensitivity(SensitivityEstimator):
         self.dynamic_weights = dynamic_weights
         self.judge_function = judge_function
         self.num_neighbors = num_neighbors
+        # If provided, subtract intrinsic jitter in quadrature from each RMS-like estimate
+        self.context_adjust_intrinsic_rms = context_adjust_intrinsic_rms
         
         # Set up random number generator
         self.rng = np.random.RandomState(kwargs.get('random_seed'))
@@ -191,7 +196,14 @@ class CombinedABBSensitivity(SensitivityEstimator):
         """Fit all static sensitivity estimators."""
         self._static_sensitivities = {}
         
-        for name, estimator in self.static_estimators.items():
+        # Progress bar for static estimators
+        try:
+            from tqdm import tqdm as _tqdm
+            _iter = _tqdm(self.static_estimators.items(), total=len(self.static_estimators), desc="A-BB (static)")
+        except Exception:
+            _iter = self.static_estimators.items()
+        
+        for name, estimator in _iter:
             try:
                 estimator.fit(judgments, **kwargs)
                 # We'll get sensitivity in estimate() call
@@ -204,7 +216,14 @@ class CombinedABBSensitivity(SensitivityEstimator):
         """Fit all dynamic neighbor generators."""
         self._dynamic_sensitivities = {}
         
-        for name, generator in self.dynamic_generators.items():
+        # Progress bar for dynamic generators (A-BB runs)
+        try:
+            from tqdm import tqdm as _tqdm
+            _iter = _tqdm(self.dynamic_generators.items(), total=len(self.dynamic_generators), desc="A-BB (dynamic)")
+        except Exception:
+            _iter = self.dynamic_generators.items()
+        
+        for name, generator in _iter:
             try:
                 # Create A-BB estimator for this generator
                 abb_estimator = ABBSensitivity(
@@ -252,6 +271,10 @@ class CombinedABBSensitivity(SensitivityEstimator):
             if estimator is not None and name in self._static_sensitivities:
                 try:
                     estimate = estimator.estimate(score_range)
+                    # Context-adjust RMS if intrinsic provided
+                    if self.context_adjust_intrinsic_rms is not None:
+                        from ..core.utils import context_adjusted_rms
+                        estimate = context_adjusted_rms(estimate, self.context_adjust_intrinsic_rms)
                     if estimate > 0:
                         static_estimates.append(estimate)
                         self._measurement_details[f"static_{name}"] = estimate
@@ -264,6 +287,10 @@ class CombinedABBSensitivity(SensitivityEstimator):
             if abb_estimator is not None:
                 try:
                     estimate = abb_estimator.estimate(score_range)
+                    # Context-adjust RMS if intrinsic provided
+                    if self.context_adjust_intrinsic_rms is not None and not getattr(abb_estimator, 'is_profile_based', False):
+                        from ..core.utils import context_adjusted_rms
+                        estimate = context_adjusted_rms(estimate, self.context_adjust_intrinsic_rms)
                     if estimate > 0:
                         dynamic_estimates.append(estimate)
                         self._measurement_details[f"dynamic_{name}"] = estimate
@@ -442,16 +469,8 @@ class CombinedABBSensitivity(SensitivityEstimator):
         if not self._fitted or self._combined_sensitivity is None:
             raise ValueError("Must fit estimator and estimate sensitivity before validating constraint")
         
-        constraint_threshold = self._combined_sensitivity * np.sqrt(2.0 / delta)
-        constraint_satisfied = tau > constraint_threshold
-        
-        return {
-            "constraint_satisfied": constraint_satisfied,
-            "tau": tau,
-            "delta": delta,
-            "combined_sensitivity": self._combined_sensitivity,
-            "constraint_threshold": constraint_threshold,
-            "margin": tau - constraint_threshold,
-            "constraint_formula": "τ > Δ*₂_combined(f,D) * sqrt(2/δ)",
-            "measurement_breakdown": self.get_measurement_breakdown()
-        }
+        result = compute_abb_constraint_validation(
+            tau=float(tau), delta=float(delta), sensitivity=float(self._combined_sensitivity), label='Δ*₂_combined(f,D)'
+        )
+        result["measurement_breakdown"] = self.get_measurement_breakdown()
+        return result

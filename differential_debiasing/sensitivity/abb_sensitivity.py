@@ -8,7 +8,7 @@ from typing import Union, Dict, Any, Optional, List, Callable
 
 from .base import SensitivityEstimator
 from ..neighbors import BaseNeighborGenerator, HammingNeighborGenerator
-from ..core.utils import rms_from_differences
+from ..core.utils import rms_from_differences, compute_abb_constraint_validation
 
 
 class ABBSensitivity(SensitivityEstimator):
@@ -491,19 +491,13 @@ class ABBSensitivity(SensitivityEstimator):
         if not self._fitted:
             raise ValueError("Must fit estimator before validating constraint")
         
-        rms_sensitivity = self._rms_sensitivity or 0.0
-        constraint_threshold = rms_sensitivity * np.sqrt(2.0 / delta)
-        constraint_satisfied = tau > constraint_threshold
-        
-        return {
-            "constraint_satisfied": constraint_satisfied,
-            "tau": tau,
-            "delta": delta,
-            "rms_sensitivity": rms_sensitivity,
-            "constraint_threshold": constraint_threshold,
-            "margin": tau - constraint_threshold,
-            "constraint_formula": "τ > Δ*₂(f,D) * sqrt(2/δ)"
-        }
+        rms_sensitivity = float(self._rms_sensitivity or 0.0)
+        result = compute_abb_constraint_validation(
+            tau=float(tau), delta=float(delta), sensitivity=rms_sensitivity
+        )
+        # Preserve original key name for backward compatibility
+        result["rms_sensitivity"] = rms_sensitivity
+        return result
     
     def get_sampled_neighbors(self) -> List[Union[Dict, pd.DataFrame]]:
         """

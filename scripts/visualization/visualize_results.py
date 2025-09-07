@@ -34,7 +34,7 @@ def create_sensitivity_comparison(results: dict) -> plt.Figure:
                         'approach': approach_name.replace('combined_abb_', ''),
                         'combined_sensitivity': approach_result['diagnostics']['combined_sensitivity'],
                         'correlation': approach_result['validation']['correlation'],
-                        'constraint_satisfied': approach_result['diagnostics']['abb_constraint_satisfied'],
+                        'constraint_satisfied': approach_result['diagnostics'].get('abb_constraint_satisfied'),
                         'noise_std': approach_result['diagnostics']['noise_std']
                     })
     
@@ -98,7 +98,7 @@ def create_judge_comparison(results: dict) -> plt.Figure:
                         'approach': approach_name.replace('combined_abb_', ''),
                         'combined_sensitivity': approach_result['diagnostics']['combined_sensitivity'],
                         'correlation': approach_result['validation']['correlation'],
-                        'constraint_satisfied': approach_result['diagnostics']['abb_constraint_satisfied']
+                        'constraint_satisfied': approach_result['diagnostics'].get('abb_constraint_satisfied')
                     })
     
     df = pd.DataFrame(data)
@@ -331,7 +331,7 @@ def create_summary_table(results: dict) -> pd.DataFrame:
                         'Strategy': approach_name.replace('combined_abb_', ''),
                         'Combined Sensitivity': f"{approach_result['diagnostics']['combined_sensitivity']:.4f}",
                         'Correlation': f"{approach_result['validation']['correlation']:.3f}",
-                        'Constraint Satisfied': '✅' if approach_result['diagnostics']['abb_constraint_satisfied'] else '❌',
+                        'Constraint Satisfied': '✅' if approach_result['diagnostics'].get('abb_constraint_satisfied') else '❌',
                         'Noise Std': f"{approach_result['diagnostics']['noise_std']:.4f}",
                         'Samples': approach_result['n_samples']
                     })
@@ -353,6 +353,24 @@ def main():
     results = load_results(results_file)
     
     print(f"✅ Loaded results for {len(results)} judges")
+    # Clarify constraint source in logs
+    print("ℹ️ Constraint status source: diagnostics.abb_constraint_satisfied (from JSON); no recomputation performed.")
+    # Quick summary of availability in the JSON
+    true_count = false_count = missing_count = 0
+    for judge_name, judge_results in results.items():
+        if 'approaches' not in judge_results:
+            continue
+        for approach_name, approach_result in judge_results['approaches'].items():
+            if not approach_result.get('success', False):
+                continue
+            val = (approach_result.get('diagnostics') or {}).get('abb_constraint_satisfied', None)
+            if val is True:
+                true_count += 1
+            elif val is False:
+                false_count += 1
+            else:
+                missing_count += 1
+    print(f"   ↪︎ JSON constraint flags — true: {true_count}, false: {false_count}, missing: {missing_count}")
     
     # Output directory
     output_dir = Path("combined_abb_visualizations")
