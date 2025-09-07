@@ -49,11 +49,10 @@ class SensitivityProfile:
         if not self.created_date:
             warnings.warn("Profile has no creation date")
         
-        # Validate formatting sensitivity
-        if 'error' not in self.formatting_sensitivity:
+        # Validate formatting sensitivity if present. Intrinsic-only profiles may omit this block.
+        if self.formatting_sensitivity and 'error' not in self.formatting_sensitivity:
             if 'value' not in self.formatting_sensitivity:
                 raise ValueError("Formatting sensitivity missing required 'value' field")
-            
             value = self.formatting_sensitivity['value']
             if not isinstance(value, (int, float)) or value < 0:
                 raise ValueError(f"Invalid formatting sensitivity value: {value}")
@@ -85,6 +84,26 @@ class SensitivityProfile:
         if ci and len(ci) == 2:
             return (float(ci[0]), float(ci[1]))
         return None
+
+    def get_hamming_sensitivity(self) -> Optional[float]:
+        """Get Hamming-1 sensitivity if present in the formatting block."""
+        fs = self.formatting_sensitivity or {}
+        ham = fs.get('hamming_sensitivity') if isinstance(fs, dict) else None
+        if isinstance(ham, dict) and 'value' in ham:
+            try:
+                return float(ham['value'])
+            except Exception:
+                return None
+        return None
+
+    def get_combined_average_sensitivity(self) -> Optional[float]:
+        """Get combined average sensitivity (e.g., mean of formatting and hamming) if present."""
+        fs = self.formatting_sensitivity or {}
+        val = fs.get('combined_average_sensitivity') if isinstance(fs, dict) else None
+        try:
+            return float(val) if val is not None else None
+        except Exception:
+            return None
 
     def get_intrinsic_sensitivity(self) -> Optional[float]:
         """
@@ -132,6 +151,8 @@ class SensitivityProfile:
         """Get a summary of the profile."""
         formatting_value = self.get_formatting_sensitivity()
         formatting_ci = self.get_formatting_confidence_interval()
+        hamming_value = self.get_hamming_sensitivity()
+        combined_avg = self.get_combined_average_sensitivity()
         
         return {
             'judge_name': self.judge_name,
@@ -142,6 +163,8 @@ class SensitivityProfile:
                 'confidence_interval': formatting_ci,
                 'has_error': 'error' in self.formatting_sensitivity
             },
+            'hamming_sensitivity': hamming_value,
+            'combined_average_sensitivity': combined_avg,
             'samples_used': self.formatting_sensitivity.get('samples_used'),
             'cost_info': self.get_cost_info()
         }

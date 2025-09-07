@@ -121,8 +121,13 @@ class ProfileEnhancedABBSensitivity(CombinedABBSensitivity):
         # Map generator names to profile methods
         if generator_name in ['formatting', 'FormattingNeighborGenerator']:
             return self.sensitivity_profile.get_formatting_sensitivity()
+        if generator_name in ['hamming', 'HammingNeighborGenerator']:
+            # If present in profile, use precomputed hamming sensitivity
+            if hasattr(self.sensitivity_profile, 'get_hamming_sensitivity'):
+                return self.sensitivity_profile.get_hamming_sensitivity()
+            return None
         
-        # Future: Add other mappings (hamming, order, etc.)
+        # Future: Add other mappings (order, etc.)
         return None
 
 

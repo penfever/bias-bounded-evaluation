@@ -1,0 +1,105 @@
+{
+  "judge_name": "deepseek-r1-32b-gguf",
+  "profile_version": "1.1",
+  "created_date": "2025-09-06T23:47:52.185653+00:00",
+  "formatting_sensitivity": {
+    "value": 1.2649110640673518,
+    "confidence_interval": [
+      0.4060820938992513,
+      2.1237400342354524
+    ],
+    "samples_used": 20,
+    "neighbors_generated": 40,
+    "measurement_date": "2025-09-06T23:47:52.182485+00:00",
+    "neighbor_differences": [
+      0.0,
+      0.0,
+      2.0,
+      0.0,
+      2.0
+    ],
+    "mean_neighbor_difference": 0.8,
+    "std_neighbor_difference": 0.9797958971132713,
+    "cost_info": {
+      "config_path": "/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/bias-bounded-evaluation/configs/judges/local/deepseek-r1-32b-gguf.yaml",
+      "engine": "LLAMACPP",
+      "model_name": "unsloth/DeepSeek-R1-Distill-Qwen-32B-GGUF",
+      "spent_usd": 0.0,
+      "budget_usd": 10.0,
+      "budget_remaining": 10.0,
+      "queries_cached": 25
+    },
+    "diagnostics": {
+      "method": "ABBSensitivity",
+      "fitted": true,
+      "bias_sensitivity": 1.2649110640673518,
+      "params": {
+        "random_seed": 42
+      },
+      "rms_sensitivity": 1.2649110640673518,
+      "num_neighbors": 40,
+      "actual_neighbors_sampled": 5,
+      "neighbor_generator": {
+        "generator_type": "FormattingNeighborGenerator",
+        "random_seed": 42,
+        "params": {},
+        "description": "Formatting variations: rephrasing"
+      },
+      "neighbor_differences": [
+        0.0,
+        0.0,
+        2.0,
+        0.0,
+        2.0
+      ],
+      "mean_neighbor_difference": 0.8,
+      "std_neighbor_difference": 0.9797958971132713,
+      "max_neighbor_difference": 2.0,
+      "original_judgment_shape": [
+        19
+      ],
+      "has_judge_function": true
+    },
+    "baseline_scores": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      2.0,
+      1.0,
+      3.0,
+      1.0,
+      5.0,
+      2.0,
+      3.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      4.0,
+      2.0
+    ],
+    "representation": {
+      "type": "likert_numeric",
+      "min_score": 1.0,
+      "max_score": 5.0
+    },
+    "disable_transforms": false,
+    "hamming_sensitivity": {
+      "value": 0.22235198539291182,
+      "neighbors_generated": 40
+    },
+    "combined_average_sensitivity": 0.7436315247301318
+  },
+  "measurement_metadata": {
+    "script_version": "1.1",
+    "measurement_approach": "arena_hard_content_perturbation",
+    "neighbor_types": [
+      "rephrasing"
+    ],
+    "notes": "Formatting sensitivity measured using Arena-Hard content perturbations",
+    "dataset_id": "DeepSeek-R1-32B-setting1"
+  }
+}

@@ -8,6 +8,7 @@ improving performance and flexibility.
 """
 
 import sys
+import os
 import difflib
 import os
 import json
@@ -106,14 +107,34 @@ def measure_formatting_sensitivity(judge_name: str,
         print(f"🎲 Using {len(measurement_samples)} samples for measurement")
         
         # Create formatting neighbor generator
+        # Prefer a lightweight rephrase model via OUMI_REPHRASE_CONFIG; otherwise reuse the judge engine
+        rephrase_cfg = os.getenv('OUMI_REPHRASE_CONFIG')
+        shared_engine = None
+        try:
+            # Force-create engine now so we can reuse it if needed
+            if hasattr(judge_function, 'interface'):
+                shared_engine = judge_function.interface._get_inference_engine()
+        except Exception:
+            shared_engine = None
+        if rephrase_cfg:
+            print(f"🧠 Using rephrase engine from OUMI_REPHRASE_CONFIG: {rephrase_cfg}")
+        else:
+            if shared_engine is not None:
+                print("♻️ Reusing judge engine for rephrasing to avoid double-loading the model")
+            else:
+                print("⚠️ No OUMI_REPHRASE_CONFIG set and judge engine unavailable; rephrasing may instantiate a new model")
+
         formatting_generator = FormattingNeighborGenerator(
             text_fields=['answer_a', 'answer_b'],
             formatting_types=['rephrasing'],
             single_field=True,
             disable_transforms=disable_transforms,
             random_seed=42,
-            oumi_config_path=str(judge_config_path),
-            oumi_retries=oumi_retries
+            # If a specific rephrase config is provided, use it; else share the judge engine
+            oumi_config_path=(rephrase_cfg if rephrase_cfg else None),
+            oumi_shared_engine=(None if rephrase_cfg else shared_engine),
+            oumi_retries=oumi_retries,
+            rephrase_temperature=0.3
         )
         
         # Create ABB sensitivity estimator

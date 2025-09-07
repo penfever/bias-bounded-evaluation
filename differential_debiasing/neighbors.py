@@ -247,6 +247,9 @@ class FormattingNeighborGenerator(BaseNeighborGenerator):
                  oumi_config_path: Optional[str] = None,
                  oumi_retries: int = 3,
                  oumi_backoff_sec: float = 1.0,
+                 rephrase_temperature: Optional[float] = None,
+                 # Optional: reuse an existing Oumi engine to avoid double-instantiation (e.g., LLAMACPP 32B)
+                 oumi_shared_engine: Optional[Any] = None,
                  **kwargs):
         """
         Initialize formatting neighbor generator.
@@ -274,11 +277,30 @@ class FormattingNeighborGenerator(BaseNeighborGenerator):
         self.oumi_retries = int(oumi_retries)
         self.oumi_backoff_sec = float(oumi_backoff_sec)
         self._oumi_engine = None
+        self._oumi_generation_params = None
+        self.rephrase_temperature = rephrase_temperature
+        # If provided, reuse an existing engine (prevents second heavy model load)
+        self.oumi_shared_engine = oumi_shared_engine
 
     def _get_oumi_engine(self):
-        """Lazily build an Oumi inference engine for rephrasing."""
+        """Lazily build or reuse an Oumi inference engine for rephrasing."""
         if self._oumi_engine is not None:
             return self._oumi_engine
+        # Prefer a shared engine if supplied (avoids double instantiation / OOM)
+        if self.oumi_shared_engine is not None:
+            try:
+                # Create default generation params if not already set
+                if self._oumi_generation_params is None:
+                    from oumi.core.configs import GenerationParams
+                    self._oumi_generation_params = GenerationParams(
+                        max_new_tokens=1024,
+                        temperature=float(self.rephrase_temperature) if self.rephrase_temperature is not None else 0.2,
+                        top_p=0.9,
+                    )
+                self._oumi_engine = self.oumi_shared_engine
+                return self._oumi_engine
+            except Exception as e:
+                raise RuntimeError(f"Failed to use shared Oumi engine for rephrasing: {e}")
         import os
         cfg_path = self.oumi_config_path or os.getenv('OUMI_REPHRASE_CONFIG')
         if not cfg_path:
@@ -309,6 +331,12 @@ class FormattingNeighborGenerator(BaseNeighborGenerator):
                 temperature=gc.get('temperature', 0.2),
                 top_p=gc.get('top_p', 0.9)
             )
+            # Override temperature for rephrasing if requested
+            if self.rephrase_temperature is not None:
+                try:
+                    self._oumi_generation_params.temperature = float(self.rephrase_temperature)
+                except Exception:
+                    pass
             rc = cfg.get('remote', {})
             api_key = rc.get('api_key')
             if not api_key:
@@ -542,10 +570,25 @@ class FormattingNeighborGenerator(BaseNeighborGenerator):
                 if out_text is None:
                     out_text = str(oc)
                 rephrased = out_text.strip()
-                ratio = len(rephrased) / max(len(text), 1)
+                # Word-based comparison with simple markup cleanup
+                import re as _re
+                def _clean(s: str) -> str:
+                    return _re.sub(r"<\|[^|]+\|>", " ", s)
+                orig_clean = _clean(text)
+                reph_clean = _clean(rephrased)
+                orig_words = [w for w in orig_clean.split() if w]
+                reph_words = [w for w in reph_clean.split() if w]
+                ratio = (len(reph_words) / max(len(orig_words), 1))
                 if 0.75 <= ratio <= 1.25:
                     return rephrased
-                raise ValueError(f"Rephrase length ratio out of bounds: {ratio:.2f}")
+                # Include full original and rephrased text for debugging
+                raise ValueError(
+                    (
+                        f"Rephrase length ratio out of bounds: {ratio:.2f}; "
+                        f"original_words={len(orig_words)}; rephrased_words={len(reph_words)}; "
+                        f"original=<<<{text}>>>; rephrased=<<<{rephrased}>>>"
+                    )
+                )
             except Exception as e:
                 last_err = e
                 attempt += 1
@@ -554,89 +597,10 @@ class FormattingNeighborGenerator(BaseNeighborGenerator):
                 time.sleep(self.oumi_backoff_sec * (2 ** (attempt - 1)))
 
     def _rephrase_text(self, text: str) -> str:
-        """Rephrase text using LLM while preserving functional utility and meaning."""
-        # Use Oumi-based rephrasing path
+        """Rephrase text using Oumi (strict)."""
         return self._oumi_rephrase(text)
-        try:
-            # Import here to avoid circular imports
-            from openai import OpenAI
-            import os
-            
-            client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-            
-            # Create rephrasing prompt
-            rephrasing_prompt = """Make MINIMAL stylistic changes to the following text while preserving the exact same meaning and functionality. Only make very small changes like:
-- Replace 1-2 words with close synonyms (e.g. "use" → "utilize", "help" → "assist") 
-- Minor grammatical restructuring (e.g. "You can do X" → "One can do X")
-- Do NOT change technical terms, code, numbers, or key concepts
-- Do NOT change the overall message or tone
-- Keep the same length and structure
-
-Text to rephrase:
-{text}
-
-Minimally rephrased version:"""
-
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "user", "content": rephrasing_prompt.format(text=text)}
-                ],
-                temperature=0.2,  # Very low creativity for minimal changes
-                max_tokens=len(text.split()) * 3  # Reasonable length limit
-            )
-            
-            rephrased = response.choices[0].message.content.strip()
-            
-            # Basic validation - ensure rephrasing isn't too different in length
-            length_ratio = len(rephrased) / max(len(text), 1)
-            if 0.75 <= length_ratio <= 1.25:  # Tight length validation: 75%-125%
-                return rephrased
-            else:
-                # If rephrasing changes length too much, raise to skip this neighbor
-                raise ValueError(f"Rephrasing length check failed: {len(text)} -> {len(rephrased)} (ratio={length_ratio:.2f})")
-                
-        except Exception as e:
-            # Fail loudly; caller will skip this neighbor
-            raise RuntimeError(f"Rephrasing failed: {e}")
     
-    def _apply_fallback_changes(self, text: str) -> str:
-        """Apply minimal fallback changes when rephrasing fails."""
-        # Simple synonym replacements that don't change meaning
-        replacements = [
-            ('the', 'a'),
-            ('and', '&'),
-            ('you', 'one'),
-            ('can', 'may'),
-            ('should', 'ought to'),
-            ('will', 'shall'),
-            ('because', 'since'),
-            ('also', 'additionally'),
-            ('however', 'nevertheless'),
-            ('therefore', 'thus')
-        ]
-        
-        modified_text = text
-        
-        # Try one random replacement
-        if replacements and self.rng.random() < 0.3:
-            old_word, new_word = self.rng.choice(replacements)
-            if f' {old_word} ' in modified_text.lower():
-                # Case-preserving replacement
-                import re
-                pattern = re.compile(rf'\b{re.escape(old_word)}\b', re.IGNORECASE)
-                match = pattern.search(modified_text)
-                if match:
-                    original = match.group()
-                    if original.isupper():
-                        replacement = new_word.upper()
-                    elif original.istitle():
-                        replacement = new_word.title()
-                    else:
-                        replacement = new_word
-                    modified_text = pattern.sub(replacement, modified_text, count=1)
-        
-        return modified_text
+    # Fallback modifications removed: strict rephrasing only
     
     def get_description(self) -> str:
         """Get description of formatting neighbor generator."""
@@ -685,7 +649,8 @@ Minimally rephrased version:"""
                     question, answer_a, answer_b = _parse_arena_hard_prompt(user_prompt)
                     
                     # Apply formatting perturbations respecting configured fields and single_field
-                    allowed_fields = self.text_fields if self.text_fields is not None else ['question', 'answer_a', 'answer_b']
+                    # Only allow configured text fields (defaults to assistant answers only)
+                    allowed_fields = self.text_fields if self.text_fields is not None else ['answer_a', 'answer_b']
                     fields_to_modify = allowed_fields
                     if self.single_field and len(allowed_fields) > 0:
                         fields_to_modify = [self.rng.choice(allowed_fields)]
@@ -764,6 +729,9 @@ Minimally rephrased version:"""
         successful_samples = []
         original_contexts = []
         
+        import os as _os
+        debug_rephrase = _os.getenv('A_BB_REPHRASE_DEBUG', '').strip() in ('1', 'true', 'yes')
+
         for _, row in sampled_df.iterrows():
             question_id = row['question_id'] 
             model_name = row['model']
@@ -774,6 +742,12 @@ Minimally rephrased version:"""
                 user_prompt = judgment_data['games'][0]['user_prompt']
                 question, answer_a, answer_b = _parse_arena_hard_prompt(user_prompt)
                 
+                if debug_rephrase:
+                    qw = len(str(question).split())
+                    aw = len(str(answer_a).split())
+                    bw = len(str(answer_b).split())
+                    print(f"   📦 Loaded qid={question_id} model={model_name} words: question={qw}, answer_a={aw}, answer_b={bw}")
+
                 original_context = {
                     'question': question,
                     'answer_a': answer_a, 
@@ -801,6 +775,14 @@ Minimally rephrased version:"""
         # Create num_neighbors single-sample perturbation experiments
         all_neighbors = []
         
+        import os as _os
+        debug_rephrase = _os.getenv('A_BB_REPHRASE_DEBUG', '').strip() in ('1', 'true', 'yes')
+
+        # Progress bar for rephrasing stage (one rephrase per experiment in single_field mode)
+        from tqdm import tqdm as _tqdm
+        pbar = _tqdm(total=num_neighbors, desc="Rephrasing (Oumi)", leave=True)
+        skipped_due_to_rephrase = 0
+
         for neighbor_idx in range(num_neighbors):
             # For each experiment, choose exactly ONE sample to perturb
             sample_to_perturb_idx = self.rng.randint(0, len(successful_samples))
@@ -818,7 +800,10 @@ Minimally rephrased version:"""
                     allowed_fields = self.text_fields if self.text_fields is not None else ['question', 'answer_a', 'answer_b']
                     fields_to_modify = allowed_fields
                     if self.single_field and len(allowed_fields) > 0:
-                        fields_to_modify = [self.rng.choice(allowed_fields)]
+                        chosen = self.rng.choice(allowed_fields)
+                        fields_to_modify = [chosen]
+                        if debug_rephrase:
+                            print(f"   🎯 Experiment {neighbor_idx}: qid={question_id} will perturb field={chosen}")
 
                     perturbed_question = original['question']
                     perturbed_answer_a = original['answer_a']
@@ -826,14 +811,32 @@ Minimally rephrased version:"""
                     
                     try:
                         if 'question' in fields_to_modify:
+                            if debug_rephrase:
+                                ow = len(str(original['question']).split())
+                                print(f"   🪄 Rephrase target qid={question_id} field=question words={ow} exp={neighbor_idx} idx={i} sample")
                             perturbed_question = self._apply_formatting_changes(original['question'])
                         if 'answer_a' in fields_to_modify:
+                            if debug_rephrase:
+                                ow = len(str(original['answer_a']).split())
+                                snippet = ' '.join(str(original['answer_a']).split()[:12])
+                                print(f"   🪄 Rephrase target qid={question_id} field=answer_a words={ow} exp={neighbor_idx} idx={i} snippet=<<<{snippet}>>>")
                             perturbed_answer_a = self._apply_formatting_changes(original['answer_a'])
                         if 'answer_b' in fields_to_modify:
+                            if debug_rephrase:
+                                ow = len(str(original['answer_b']).split())
+                                snippet = ' '.join(str(original['answer_b']).split()[:12])
+                                print(f"   🪄 Rephrase target qid={question_id} field=answer_b words={ow} exp={neighbor_idx} idx={i} snippet=<<<{snippet}>>>")
                             perturbed_answer_b = self._apply_formatting_changes(original['answer_b'])
                     except Exception as e:
-                        print(f"⚠️ Skipping experiment {neighbor_idx} due to rephrasing error: {e}")
+                        print(f"⚠️ Skipping experiment {neighbor_idx} due to rephrasing error on {fields_to_modify} (qid={question_id}): {e}")
+                        if debug_rephrase:
+                            # Log originals to confirm wrong-variable issues
+                            oq = ' '.join(str(original['question']).split()[:25])
+                            oa = ' '.join(str(original['answer_a']).split()[:25])
+                            ob = ' '.join(str(original['answer_b']).split()[:25])
+                            print(f"   ↪︎ Original snippets qid={question_id}: question=<<<{oq}>>> | answer_a=<<<{oa}>>> | answer_b=<<<{ob}>>>")
                         skip_experiment = True
+                        skipped_due_to_rephrase += 1
                         break
                     
                     perturbed_context = {
@@ -860,9 +863,22 @@ Minimally rephrased version:"""
             if skip_experiment:
                 continue
             all_neighbors.append(neighbor_contexts)
+            # Count this experiment as one completed rephrase
+            try:
+                pbar.update(1)
+            except Exception:
+                pass
         
+        # Close progress bar and print summary
+        try:
+            pbar.close()
+        except Exception:
+            pass
+
         print(f"✅ Created {len(all_neighbors)} single-sample perturbation experiments")
         print(f"   Each experiment perturbs exactly 1 out of {len(successful_samples)} samples")
+        if skipped_due_to_rephrase:
+            print(f"   ⚠️ Skipped {skipped_due_to_rephrase} experiments due to rephrasing errors")
         return all_neighbors
 
 

@@ -1,0 +1,107 @@
+{
+  "judge_name": "gpt-3.5-turbo",
+  "created_date": "2025-09-06T12:11:59.846745+00:00",
+  "description": "Sample formatting neighbor transformations for manual inspection",
+  "samples": [
+    {
+      "question_id": "51c444da19ec4cf1a5fc387667e4a7cf",
+      "model": "gpt-4-0613",
+      "changed_field": "answer_b",
+      "original_response": "Sure, here's a simple 12-bar chord progression in the Lydian mode:\n\n1. Cmaj7 (I)\n2. Dmaj7 (II)\n3. Em7 (iii)\n4. F#m7b5 (iv°)\n5. Gmaj7 (V)\n6. Am7 (vi)\n7. Bm7 (vii)\n8. Cmaj7 (I)\n9. Dmaj7 (II)\n10. Gmaj7 (V)\n11. Am7 (vi)\n12. Cmaj7 (I)\n\nThis progression uses the chords built on each degree of the C Lydian scale (C, D, E, F#, G, A, B). The Lydian mode is similar to the major scale but with a raised 4th, which gives it a unique, dreamy sound.",
+      "neighbors": [
+        "Here's a basic 12-bar chord progression in the Lydian mode:\n\n1. Cmaj7 (I)\n2. Dmaj7 (II)\n3. Em7 (iii)\n4. F#m7b5 (iv°)\n5. Gmaj7 (V)\n6. Am7 (vi)\n7. Bm7 (vii)\n8. Cmaj7 (I)\n9. Dmaj7 (II)\n10. Gmaj7 (V)\n11. Am7 (vi)\n12. Cmaj7 (I)\n\nThis progression uses the chords from the C Lydian scale (C, D, E, F#, G, A, B). The Lydian mode is similar to the major scale but with a raised 4th, creating a unique, dreamy sound."
+      ],
+      "diff": "--- original\n+++ neighbor\n@@ -1,4 +1,4 @@\n-Sure, here's a simple 12-bar chord progression in the Lydian mode:\n+Here's a basic 12-bar chord progression in the Lydian mode:\n \n 1. Cmaj7 (I)\n 2. Dmaj7 (II)\n@@ -13,4 +13,4 @@\n 11. Am7 (vi)\n 12. Cmaj7 (I)\n \n-This progression uses the chords built on each degree of the C Lydian scale (C, D, E, F#, G, A, B). The Lydian mode is similar to the major scale but with a raised 4th, which gives it a unique, dreamy sound.\n+This progression uses the chords from the C Lydian scale (C, D, E, F#, G, A, B). The Lydian mode is similar to the major scale but with a raised 4th, creating a unique, dreamy sound.",
+      "original_judgment": {
+        "pairwise": "A>>B",
+        "score": 1.0
+      },
+      "neighbor_judgments": [
+        {
+          "pairwise": "A>B",
+          "score": 2.0
+        }
+      ]
+    },
+    {
+      "question_id": "51c444da19ec4cf1a5fc387667e4a7cf",
+      "model": "gpt-4-0613",
+      "changed_field": "answer_a",
+      "original_response": "Sure! In the Lydian mode, the chords are built on the scale degrees of the Lydian scale. Here's a 12-bar chord progression in C Lydian:\n\n| Cmaj7  | Dmaj7  | Em7    | F#m7b5 |\n\n| Cmaj7  | Dmaj7  | Em7    | F#m7b5 |\n\n| Cmaj7  | Dmaj7  | Em7    | Cmaj7  |\n\nThis progression uses the I, II, iii, and iv° chords of the C Lydian mode.",
+      "neighbors": [
+        "Of course! In the Lydian mode, the chords are constructed based on the scale degrees of the Lydian scale. Here is a 12-bar chord progression in C Lydian:\n\n| Cmaj7  | Dmaj7  | Em7    | F#m7b5 |\n\n| Cmaj7  | Dmaj7  | Em7    | F#m7b5 |\n\n| Cmaj7  | Dmaj7  | Em7    | Cmaj7  |\n\nThis progression includes the I, II, iii, and iv° chords of the C Lydian mode."
+      ],
+      "diff": "--- original\n+++ neighbor\n@@ -1,4 +1,4 @@\n-Sure! In the Lydian mode, the chords are built on the scale degrees of the Lydian scale. Here's a 12-bar chord progression in C Lydian:\n+Of course! In the Lydian mode, the chords are constructed based on the scale degrees of the Lydian scale. Here is a 12-bar chord progression in C Lydian:\n \n | Cmaj7  | Dmaj7  | Em7    | F#m7b5 |\n \n@@ -6,4 +6,4 @@\n \n | Cmaj7  | Dmaj7  | Em7    | Cmaj7  |\n \n-This progression uses the I, II, iii, and iv° chords of the C Lydian mode.\n+This progression includes the I, II, iii, and iv° chords of the C Lydian mode.",
+      "original_judgment": {
+        "pairwise": "B>A",
+        "score": 4.0
+      },
+      "neighbor_judgments": [
+        {
+          "pairwise": "A=B",
+          "score": 3.0
+        }
+      ]
+    },
+    {
+      "question_id": "90b29911b57848ec89fc7d8c15f27c88",
+      "model": "Llama-3-8B-Tulu-330K",
+      "changed_field": "answer_a",
+      "original_response": "Incorporating AI in the private equity deal sourcing process can significantly improve efficiency, accuracy, and the overall effectiveness of identifying and evaluating potential investment opportunities. Here are some steps to integrate AI into the deal sourcing process:\n\n1. Define objectives and criteria: Clearly outline the investment objectives and criteria, such as target industries, company size, growth potential, and financial performance. This information will guide the AI algorithms in identifying relevant deals.\n\n2. Data collection and integration: Gather and consolidate data from various sources, such as financial databases, company websites, news articles, and social media. This data will be used to train and feed the AI algorithms. Ensure that the data is clean, accurate, and up-to-date.\n\n3. Develop or select AI algorithms: Choose appropriate AI algorithms, such as machine learning, natural language processing, and predictive analytics, to analyze the collected data and identify potential deals. You can either develop custom algorithms or use existing AI platforms and tools.\n\n4. Train the AI algorithms: Train the selected AI algorithms using historical data and known successful deals. This will help the algorithms learn patterns and relationships between various factors and successful investments.\n\n5. Test and refine the AI algorithms: Continuously test the AI algorithms against new data and deals to evaluate their accuracy and effectiveness. Refine and optimize the algorithms based on the results and feedback.\n\n6. Automate deal identification: Implement the AI algorithms to automatically identify and rank potential deals based on the defined objectives and criteria. This will help streamline the deal sourcing process and reduce manual efforts.\n\n7. Monitor and update the AI system: Regularly monitor the AI system's performance and update the algorithms and data as needed. This will ensure that the AI system remains effective and relevant in the ever-changing market conditions.\n\n8. Integrate AI with existing systems: Incorporate the AI system into the existing deal sourcing workflow and tools, such as CRM systems and deal tracking platforms. This will help create a seamless and efficient process for the private equity team.\n\n9. Train the team: Educate the private equity team on how to use the AI system and interpret its results. This will help them make informed decisions and better utilize the AI-generated insights.\n\n10. Continuously improve the AI system: As the AI system is used and more data is collected, continuously refine and improve the algorithms to enhance their accuracy and effectiveness in identifying potential deals.\n\nBy following these steps, private equity firms can successfully incorporate AI into their deal sourcing process, leading to more efficient and accurate identification of investment opportunities.",
+      "neighbors": [
+        "Utilizing AI in the private equity deal sourcing process can greatly enhance efficiency, precision, and the overall effectiveness of identifying and evaluating potential investment opportunities. Here are steps to integrate AI into the deal sourcing process:\n\n1. Establish objectives and criteria: Clearly define investment objectives and criteria, such as target industries, company size, growth potential, and financial performance. This will guide AI algorithms in identifying relevant deals.\n\n2. Collect and integrate data: Gather and merge data from various sources, including financial databases, company websites, news articles, and social media. This data will train and feed AI algorithms. Ensure data cleanliness, accuracy, and timeliness.\n\n3. Develop or choose AI algorithms: Select suitable AI algorithms, like machine learning, natural language processing, and predictive analytics, to analyze collected data and identify potential deals. Develop custom algorithms or use existing AI platforms and tools.\n\n4. Train AI algorithms: Train chosen AI algorithms using historical data and successful deals. This will help algorithms learn patterns and relationships between different factors and successful investments.\n\n5. Test and refine AI algorithms: Continuously test AI algorithms with new data and deals to assess accuracy and effectiveness. Refine and optimize algorithms based on results and feedback.\n\n6. Automate deal identification: Implement AI algorithms to automatically identify and rank potential deals based on defined objectives and criteria. This streamlines deal sourcing and reduces manual work.\n\n7. Monitor and update AI system: Regularly monitor AI system performance and update algorithms and data as necessary. This ensures AI system effectiveness and relevance in changing market conditions.\n\n8. Integrate AI with current systems: Integrate AI system into existing deal sourcing workflow and tools, such as CRM systems and deal tracking platforms. This creates a seamless and efficient process for the private equity team.\n\n9. Train the team: Educate the private equity team on using the AI system and interpreting its results. This helps them make informed decisions and utilize AI-generated insights effectively.\n\n10. Continuously enhance AI system: Continuously refine and improve algorithms as AI system is used and more data is collected. This enhances accuracy and effectiveness in identifying potential deals.\n\nBy following these steps, private equity firms can effectively integrate AI into their deal sourcing process, leading to more efficient and accurate identification of investment opportunities."
+      ],
+      "diff": "--- original\n+++ neighbor\n@@ -1,23 +1,23 @@\n-Incorporating AI in the private equity deal sourcing process can significantly improve efficiency, accuracy, and the overall effectiveness of identifying and evaluating potential investment opportunities. Here are some steps to integrate AI into the deal sourcing process:\n+Utilizing AI in the private equity deal sourcing process can greatly enhance efficiency, precision, and the overall effectiveness of identifying and evaluating potential investment opportunities. Here are steps to integrate AI into the deal sourcing process:\n \n-1. Define objectives and criteria: Clearly outline the investment objectives and criteria, such as target industries, company size, growth potential, and financial performance. This information will guide the AI algorithms in identifying relevant deals.\n+1. Establish objectives and criteria: Clearly define investment objectives and criteria, such as target industries, company size, growth potential, and financial performance. This will guide AI algorithms in identifying relevant deals.\n \n-2. Data collection and integration: Gather and consolidate data from various sources, such as financial databases, company websites, news articles, and social media. This data will be used to train and feed the AI algorithms. Ensure that the data is clean, accurate, and up-to-date.\n+2. Collect and integrate data: Gather and merge data from various sources, including financial databases, company websites, news articles, and social media. This data will train and feed AI algorithms. Ensure data cleanliness, accuracy, and timeliness.\n \n-3. Develop or select AI algorithms: Choose appropriate AI algorithms, such as machine learning, natural language processing, and predictive analytics, to analyze the collected data and identify potential deals. You can either develop custom algorithms or use existing AI platforms and tools.\n+3. Develop or choose AI algorithms: Select suitable AI algorithms, like machine learning, natural language processing, and predictive analytics, to analyze collected data and identify potential deals. Develop custom algorithms or use existing AI platforms and tools.\n \n-4. Train the AI algorithms: Train the selected AI algorithms using historical data and known successful deals. This will help the algorithms learn patterns and relationships between various factors and successful investments.\n+4. Train AI algorithms: Train chosen AI algorithms using historical data and successful deals. This will help algorithms learn patterns and relationships between different factors and successful investments.\n \n-5. Test and refine the AI algorithms: Continuously test the AI algorithms against new data and deals to evaluate their accuracy and effectiveness. Refine and optimize the algorithms based on the results and feedback.\n+5. Test and refine AI algorithms: Continuously test AI algorithms with new data and deals to assess accuracy and effectiveness. Refine and optimize algorithms based on results and feedback.\n \n-6. Automate deal identification: Implement the AI algorithms to automatically identify and rank potential deals based on the defined objectives and criteria. This will help streamline the deal sourcing process and reduce manual efforts.\n+6. Automate deal identification: Implement AI algorithms to automatically identify and rank potential deals based on defined objectives and criteria. This streamlines deal sourcing and reduces manual work.\n \n-7. Monitor and update the AI system: Regularly monitor the AI system's performance and update the algorithms and data as needed. This will ensure that the AI system remains effective and relevant in the ever-changing market conditions.\n+7. Monitor and update AI system: Regularly monitor AI system performance and update algorithms and data as necessary. This ensures AI system effectiveness and relevance in changing market conditions.\n \n-8. Integrate AI with existing systems: Incorporate the AI system into the existing deal sourcing workflow and tools, such as CRM systems and deal tracking platforms. This will help create a seamless and efficient process for the private equity team.\n+8. Integrate AI with current systems: Integrate AI system into existing deal sourcing workflow and tools, such as CRM systems and deal tracking platforms. This creates a seamless and efficient process for the private equity team.\n \n-9. Train the team: Educate the private equity team on how to use the AI system and interpret its results. This will help them make informed decisions and better utilize the AI-generated insights.\n+9. Train the team: Educate the private equity team on using the AI system and interpreting its results. This helps them make informed decisions and utilize AI-generated insights effectively.\n \n-10. Continuously improve the AI system: As the AI system is used and more data is collected, continuously refine and improve the algorithms to enhance their accuracy and effectiveness in identifying potential deals.\n+10. Continuously enhance AI system: Continuously refine and improve algorithms as AI system is used and more data is collected. This enhances accuracy and effectiveness in identifying potential deals.\n \n-By following these steps, private equity firms can successfully incorporate AI into their deal sourcing process, leading to more efficient and accurate identification of investment opportunities.\n+By following these steps, private equity firms can effectively integrate AI into their deal sourcing process, leading to more efficient and accurate identification of investment opportunities.",
+      "original_judgment": {
+        "pairwise": "A>>B",
+        "score": 1.0
+      },
+      "neighbor_judgments": [
+        {
+          "pairwise": "A>>B",
+          "score": 1.0
+        }
+      ]
+    },
+    {
+      "question_id": "51c444da19ec4cf1a5fc387667e4a7cf",
+      "model": "gpt-4-0613",
+      "changed_field": "answer_b",
+      "original_response": "Sure, here's a simple 12-bar chord progression in the Lydian mode:\n\n1. Cmaj7 (I)\n2. Dmaj7 (II)\n3. Em7 (iii)\n4. F#m7b5 (iv°)\n5. Gmaj7 (V)\n6. Am7 (vi)\n7. Bm7 (vii)\n8. Cmaj7 (I)\n9. Dmaj7 (II)\n10. Gmaj7 (V)\n11. Am7 (vi)\n12. Cmaj7 (I)\n\nThis progression uses the chords built on each degree of the C Lydian scale (C, D, E, F#, G, A, B). The Lydian mode is similar to the major scale but with a raised 4th, which gives it a unique, dreamy sound.",
+      "neighbors": [
+        "Here's a basic 12-bar chord progression in the Lydian mode:\n\n1. Cmaj7 (I)\n2. Dmaj7 (II)\n3. Em7 (iii)\n4. F#m7b5 (iv°)\n5. Gmaj7 (V)\n6. Am7 (vi)\n7. Bm7 (vii)\n8. Cmaj7 (I)\n9. Dmaj7 (II)\n10. Gmaj7 (V)\n11. Am7 (vi)\n12. Cmaj7 (I)\n\nThis progression uses the chords from the C Lydian scale (C, D, E, F#, G, A, B). The Lydian mode is similar to the major scale but with a raised 4th, creating a distinct, ethereal sound."
+      ],
+      "diff": "--- original\n+++ neighbor\n@@ -1,4 +1,4 @@\n-Sure, here's a simple 12-bar chord progression in the Lydian mode:\n+Here's a basic 12-bar chord progression in the Lydian mode:\n \n 1. Cmaj7 (I)\n 2. Dmaj7 (II)\n@@ -13,4 +13,4 @@\n 11. Am7 (vi)\n 12. Cmaj7 (I)\n \n-This progression uses the chords built on each degree of the C Lydian scale (C, D, E, F#, G, A, B). The Lydian mode is similar to the major scale but with a raised 4th, which gives it a unique, dreamy sound.\n+This progression uses the chords from the C Lydian scale (C, D, E, F#, G, A, B). The Lydian mode is similar to the major scale but with a raised 4th, creating a distinct, ethereal sound.",
+      "original_judgment": {
+        "pairwise": "A>>B",
+        "score": 1.0
+      },
+      "neighbor_judgments": [
+        {
+          "pairwise": "B>A",
+          "score": 4.0
+        }
+      ]
+    },
+    {
+      "question_id": "b43c07656ead4150b360294ee932b410",
+      "model": "gpt-4-0613",
+      "changed_field": "answer_a",
+      "original_response": "Here's a C++ code to solve the problem:\n\n```cpp\n#include <iostream>\n#include <string>\nusing namespace std;\n\nbool can_make_abc(string s) {\n    if (s == \"abc\" || s == \"acb\" || s == \"bac\" || s == \"cba\")\n        return true;\n    return false;\n}\n\nint main() {\n    int t;\n    string s;\n    cin >> t;\n    while (t--) {\n        cin >> s;\n        if (can_make_abc(s))\n            cout << \"YES\" << endl;\n        else\n            cout << \"NO\" << endl;\n    }\n    return 0;\n}\n```\n\nThis code first defines a function `can_make_abc` that checks if the given string can be converted to \"abc\" with at most one swap operation. Then, in the main function, it reads the number of test cases and iterates through them, checking if the given string can be converted to \"abc\" and outputting \"YES\" or \"NO\" accordingly.",
+      "neighbors": [
+        "Below is a C++ code snippet to address the issue:\n\n```cpp\n#include <iostream>\n#include <string>\nusing namespace std;\n\nbool check_abc(string s) {\n    if (s == \"abc\" || s == \"acb\" || s == \"bac\" || s == \"cba\")\n        return true;\n    return false;\n}\n\nint main() {\n    int t;\n    string s;\n    cin >> t;\n    while (t--) {\n        cin >> s;\n        if (check_abc(s))\n            cout << \"YES\" << endl;\n        else\n            cout << \"NO\" << endl;\n    }\n    return 0;\n}\n```\n\nThis code snippet initially defines a function `check_abc` that verifies if the provided string can be transformed into \"abc\" with a maximum of one swap operation. Subsequently, within the main function, it reads the number of test cases and loops through them, examining if the given string can be transformed into \"abc\" and displaying \"YES\" or \"NO\" accordingly."
+      ],
+      "diff": "--- original\n+++ neighbor\n@@ -1,11 +1,11 @@\n-Here's a C++ code to solve the problem:\n+Below is a C++ code snippet to address the issue:\n \n ```cpp\n #include <iostream>\n #include <string>\n using namespace std;\n \n-bool can_make_abc(string s) {\n+bool check_abc(string s) {\n     if (s == \"abc\" || s == \"acb\" || s == \"bac\" || s == \"cba\")\n         return true;\n     return false;\n@@ -17,7 +17,7 @@\n     cin >> t;\n     while (t--) {\n         cin >> s;\n-        if (can_make_abc(s))\n+        if (check_abc(s))\n             cout << \"YES\" << endl;\n         else\n             cout << \"NO\" << endl;\n@@ -26,4 +26,4 @@\n }\n ```\n \n-This code first defines a function `can_make_abc` that checks if the given string can be converted to \"abc\" with at most one swap operation. Then, in the main function, it reads the number of test cases and iterates through them, checking if the given string can be converted to \"abc\" and outputting \"YES\" or \"NO\" accordingly.\n+This code snippet initially defines a function `check_abc` that verifies if the provided string can be transformed into \"abc\" with a maximum of one swap operation. Subsequently, within the main function, it reads the number of test cases and loops through them, examining if the given string can be transformed into \"abc\" and displaying \"YES\" or \"NO\" accordingly.",
+      "original_judgment": {
+        "pairwise": "A>>B",
+        "score": 1.0
+      },
+      "neighbor_judgments": [
+        {
+          "pairwise": "B>A",
+          "score": 4.0
+        }
+      ]
+    }
+  ]
+}

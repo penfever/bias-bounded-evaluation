@@ -233,6 +233,8 @@ def check_sensitivity_profiles(real_judge_name: str, dataset_id: str) -> Dict[st
     profile_info = {
         'profile_available': False,
         'formatting_sensitivity': None,
+        'hamming_sensitivity': None,
+        'combined_average_sensitivity': None,
         'intrinsic_sensitivity': None,
         'context_adjusted_rms': None,
         'profile_dir': str(profile_dir)
@@ -248,6 +250,21 @@ def check_sensitivity_profiles(real_judge_name: str, dataset_id: str) -> Dict[st
                 print(f"✅ Found formatting profile for {real_judge_name}: {formatting_sensitivity:.4f}")
             else:
                 print(f"⚠️ Profile found for {real_judge_name} but formatting sensitivity is missing/failed")
+
+            # Optional values: hamming and combined average, if present in the profile
+            try:
+                ham = profile.get_hamming_sensitivity() if hasattr(profile, 'get_hamming_sensitivity') else None
+                if ham is not None:
+                    profile_info['hamming_sensitivity'] = float(ham)
+                    print(f"✅ Found hamming sensitivity in profile: {ham:.4f}")
+            except Exception:
+                pass
+            try:
+                cav = profile.get_combined_average_sensitivity() if hasattr(profile, 'get_combined_average_sensitivity') else None
+                if cav is not None:
+                    profile_info['combined_average_sensitivity'] = float(cav)
+            except Exception:
+                pass
 
         # Try dataset-scoped intrinsic jitter profile
         mgr = SensitivityProfileManager(profile_dir)
@@ -307,8 +324,19 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
             f"Ensure both profiles exist: (a) intrinsic jitter for dataset='{judge_name}' and judge='{real_judge_name}' "
             f"via: measure_judge_sensitivity.py --judge {real_judge_name} --disable-transforms, and (b) formatting RMS for judge '{real_judge_name}'."
         )
-    dynamic_generators = ['hamming', 'formatting']
+    # Choose dynamic generators based on what the profile already provides
+    dyn_gens = []
+    if profile_info.get('hamming_sensitivity') is None:
+        dyn_gens.append('hamming')
+    # Formatting sensitivity is provided via context-adjusted RMS, so skip dynamic formatting
+
+    dynamic_generators = dyn_gens
+    # Build a composed profile override including formatting (ctx) and optional hamming
     profile_override = {'value': float(ctx)}
+    if profile_info.get('hamming_sensitivity') is not None:
+        profile_override['hamming_sensitivity'] = {'value': float(profile_info['hamming_sensitivity'])}
+    if profile_info.get('combined_average_sensitivity') is not None:
+        profile_override['combined_average_sensitivity'] = float(profile_info['combined_average_sensitivity'])
     print(f"🚀 Using Context-Adjusted RMS for formatting: {ctx:.4f}")
 
     # Define Combined A-BB approaches with different aggregation strategies  
@@ -424,6 +452,7 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                     # Context-adjusted formatting RMS used (if available)
                     'context_adjusted_formatting_rms': float(profile_info['context_adjusted_rms']) if profile_info.get('context_adjusted_rms') is not None else None,
                     'formatting_profile_rms': float(profile_info['formatting_sensitivity']) if profile_info.get('formatting_sensitivity') is not None else None,
+                    'hamming_profile_rms': float(profile_info['hamming_sensitivity']) if profile_info.get('hamming_sensitivity') is not None else None,
                     'intrinsic_profile_rms': float(profile_info['intrinsic_sensitivity']) if profile_info.get('intrinsic_sensitivity') is not None else None,
                     'tau': float(bias_bounds['tau']),
                     'delta': float(bias_bounds['delta']),

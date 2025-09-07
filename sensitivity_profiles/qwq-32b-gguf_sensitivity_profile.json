@@ -1,0 +1,91 @@
+{
+  "judge_name": "qwq-32b-gguf",
+  "profile_version": "1.1",
+  "created_date": "2025-09-06T20:46:41.384232+00:00",
+  "formatting_sensitivity": {
+    "value": 3.0,
+    "confidence_interval": [
+      3.0,
+      3.0
+    ],
+    "samples_used": 20,
+    "neighbors_generated": 40,
+    "measurement_date": "2025-09-06T20:46:41.379946+00:00",
+    "neighbor_differences": [
+      3.0,
+      3.0
+    ],
+    "mean_neighbor_difference": 3.0,
+    "std_neighbor_difference": 0.0,
+    "cost_info": {
+      "config_path": "/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/bias-bounded-evaluation/configs/judges/local/qwq-32b-gguf.yaml",
+      "engine": "LLAMACPP",
+      "model_name": "unsloth/QwQ-32B-GGUF",
+      "spent_usd": 0.0,
+      "budget_usd": 10.0,
+      "budget_remaining": 10.0,
+      "queries_cached": 23
+    },
+    "diagnostics": {
+      "method": "ABBSensitivity",
+      "fitted": true,
+      "bias_sensitivity": 3.0,
+      "params": {
+        "random_seed": 42
+      },
+      "rms_sensitivity": 3.0,
+      "num_neighbors": 40,
+      "actual_neighbors_sampled": 2,
+      "neighbor_generator": {
+        "generator_type": "FormattingNeighborGenerator",
+        "random_seed": 42,
+        "params": {},
+        "description": "Formatting variations: rephrasing"
+      },
+      "neighbor_differences": [
+        3.0,
+        3.0
+      ],
+      "mean_neighbor_difference": 3.0,
+      "std_neighbor_difference": 0.0,
+      "max_neighbor_difference": 3.0,
+      "original_judgment_shape": [
+        11
+      ],
+      "has_judge_function": true
+    },
+    "baseline_scores": [
+      1.0,
+      1.0,
+      4.0,
+      2.0,
+      1.0,
+      1.0,
+      1.0,
+      2.0,
+      1.0,
+      5.0,
+      2.0
+    ],
+    "representation": {
+      "type": "likert_numeric",
+      "min_score": 1.0,
+      "max_score": 5.0
+    },
+    "disable_transforms": false,
+    "hamming_sensitivity": {
+      "value": 0.21161009834477004,
+      "neighbors_generated": 40
+    },
+    "combined_average_sensitivity": 1.605805049172385
+  },
+  "measurement_metadata": {
+    "script_version": "1.1",
+    "measurement_approach": "arena_hard_content_perturbation",
+    "neighbor_types": [
+      "rephrasing"
+    ],
+    "notes": "Formatting sensitivity measured using Arena-Hard content perturbations",
+    "dataset_id": "QwQ-32B-setting1"
+  }
+}
