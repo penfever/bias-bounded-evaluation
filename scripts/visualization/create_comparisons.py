@@ -8,8 +8,14 @@ summary plots) for each Combined A-BB strategy by comparing original and debiase
 
 import sys
 import subprocess
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from typing import List, Dict
+
+def _sanitize(name: str) -> str:
+    # Normalize to a filesystem-friendly, compact folder name
+    import re
+    return re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_").lower()
 
 def run_visualization_comparison(judge_name: str, strategy: str, base_path: Path, 
                                output_base_path: Path) -> bool:
@@ -23,48 +29,50 @@ def run_visualization_comparison(judge_name: str, strategy: str, base_path: Path
     
     # Check if paths exist
     if not original_path.exists():
-        print(f"  ❌ Original path not found: {original_path}")
-        return False
+        print(f"  ⚠️ Original path not found; will attempt fallback from debiased: {original_path}")
     
     if not debiased_path.exists():
         print(f"  ❌ Debiased path not found: {debiased_path}")
         return False
     
     # Create output directory
-    output_dir = output_base_path / f"{judge_name}_{strategy}_comparison"
+    safe_folder = f"{_sanitize(judge_name)}_{_sanitize(strategy)}_comparison"
+    output_dir = output_base_path / safe_folder
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Run the visualization script
-    script_path = "/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/scripts/visualize_bias_transformation.py"
-    
+    # Prefer in-process generation to avoid shell/env issues
     try:
-        # Use bash to source environment and run python
-        bash_cmd = f"""
-        source ~/.zshrc && conda activate oumi && python "{script_path}" \
-        --original "{original_path}" \
-        --debiased "{debiased_path}" \
-        --output-dir "{output_dir}"
-        """
-        
-        print(f"  Running visualization comparison...")
-        
-        result = subprocess.run(
-            ["bash", "-c", bash_cmd],
-            capture_output=True,
-            text=True
-        )
-        
-        if result.returncode == 0:
-            print(f"  ✅ Success! Visualizations saved to: {output_dir}")
-            return True
-        else:
-            print(f"  ❌ Error running visualization script:")
-            print(f"     stdout: {result.stdout}")
-            print(f"     stderr: {result.stderr}")
+        # visualize_bias_transformation.py lives alongside this file
+        vbt_path = Path(__file__).parent / "visualize_bias_transformation.py"
+        if not vbt_path.exists():
+            raise FileNotFoundError(f"visualize_bias_transformation.py not found at {vbt_path}")
+
+        mod = SourceFileLoader("visualize_bias_transformation", str(vbt_path)).load_module()
+
+        # Load data and generate plots
+        print("  Loading ranking data...")
+        # Always rely on debiased CSVs (they include original_score for reconstruction)
+        original_data = {}
+        debiased_data = mod.load_ranking_data(debiased_path)
+        common_metrics = sorted(set(original_data.keys()) & set(debiased_data.keys()))
+        if not common_metrics:
+            print("  ❌ No common metrics to plot")
             return False
-    
+
+        print(f"  Generating plots for metrics: {common_metrics}")
+        for metric in common_metrics:
+            mod.create_line_plot_comparison(
+                original_data, debiased_data, metric, output_dir / f"line_comparison_{metric}.png"
+            )
+            mod.create_critical_difference_plot(
+                original_data, debiased_data, metric, output_dir / f"critical_difference_{metric}.png"
+            )
+        mod.create_summary_comparison(original_data, debiased_data, output_dir / "summary_comparison.png")
+
+        print(f"  ✅ Success! Visualizations saved to: {output_dir}")
+        return True
     except Exception as e:
-        print(f"  ❌ Exception running visualization: {e}")
+        print(f"  ❌ Exception generating visualizations: {e}")
         return False
 
 def find_available_judges(base_path: Path) -> Dict[str, List[str]]:
@@ -117,6 +125,7 @@ def main():
     # Paths
     base_path = Path("/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/sos-addl-data/InDepthAnalysis")
     output_base_path = Path("/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/figures/combined_abb_comparisons")
+    output_base_path.mkdir(parents=True, exist_ok=True)
     
     # Find available judges and strategies
     print("🔍 Scanning for available rankings...")

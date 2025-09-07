@@ -29,12 +29,14 @@ class PsychometricReliabilitySensitivity(SensitivityEstimator):
     
     def __init__(self,
                  factor_columns: Optional[List[str]] = None,
-                 alpha_weight: float = 1/3,
-                 clr_weight: float = 1/3,
-                 htmt_weight: float = 1/3,
+                 alpha_weight: float = 0.5,
+                 clr_weight: float = 0.25,
+                 htmt_weight: float = 0.25,
                  clr_max: float = 2.0,
                  htmt_threshold: float = 0.85,
                  min_items_per_factor: int = 2,
+                 robust: bool = False,
+                 robust_per_factor_average: bool = False,
                  **kwargs):
         """
         Initialize psychometric reliability sensitivity estimator.
@@ -66,6 +68,8 @@ class PsychometricReliabilitySensitivity(SensitivityEstimator):
         self.clr_max = clr_max
         self.htmt_threshold = htmt_threshold
         self.min_items_per_factor = min_items_per_factor
+        self.robust = robust
+        self.robust_per_factor_average = robust_per_factor_average
         
         # Validation
         if not np.isclose(alpha_weight + clr_weight + htmt_weight, 1.0):
@@ -108,28 +112,111 @@ class PsychometricReliabilitySensitivity(SensitivityEstimator):
         # Auto-detect factor columns if not provided
         if self.factor_columns is None:
             self.factor_columns = self._detect_factor_columns(df)
-        
-        # Validate we have enough factors and items
+
         if len(self.factor_columns) < 2:
             raise ValueError("Need at least 2 factors for psychometric reliability analysis")
-        
-        # Check for sufficient items per factor (questions)
+
+        self._n_factors = len(self.factor_columns)
+
+        if self.robust:
+            # Attempt to import robust implementations from local analysis module
+            robust_mod = None
+            try:
+                from scripts.analysis import factor_reliability_robust as _rob
+                robust_mod = _rob
+            except Exception:
+                try:
+                    import importlib.util
+                    from pathlib import Path as _Path
+                    base = _Path(__file__).resolve().parents[2]
+                    rb_path = base / 'scripts' / 'analysis' / 'factor_reliability_robust.py'
+                    if rb_path.exists():
+                        spec = importlib.util.spec_from_file_location('factor_reliability_robust', str(rb_path))
+                        robust_mod = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(robust_mod)  # type: ignore
+                except Exception:
+                    robust_mod = None
+
+            if robust_mod is None:
+                warnings.warn("Robust reliability functions not available; falling back to standard calculations.")
+                factor_data = df[self.factor_columns].dropna()
+                if len(factor_data) < self.min_items_per_factor:
+                    warnings.warn(f"Only {len(factor_data)} items available, minimum {self.min_items_per_factor} recommended")
+                self._cronbach_alphas = self._calculate_cronbach_alphas(factor_data)
+                self._clr_scores = self._calculate_cross_loading_ratios(factor_data)
+                self._htmt_matrix = self._calculate_htmt_matrix(factor_data)
+                self._reliability_score = self._compute_reliability_score()
+                return
+
+            # Build per-factor matrices: rows=model, cols=question_id, values=factor score
+            if not all(c in df.columns for c in ['model', 'question_id']):
+                warnings.warn("Robust mode requires 'model' and 'question_id' columns; falling back to standard calculations.")
+                factor_data = df[self.factor_columns].dropna()
+                self._cronbach_alphas = self._calculate_cronbach_alphas(factor_data)
+                self._clr_scores = self._calculate_cross_loading_ratios(factor_data)
+                self._htmt_matrix = self._calculate_htmt_matrix(factor_data)
+                self._reliability_score = self._compute_reliability_score()
+                return
+
+            factor_matrices: Dict[str, np.ndarray] = {}
+            for factor in self.factor_columns:
+                try:
+                    mat = df.pivot_table(index='model', columns='question_id', values=factor, aggfunc='mean')
+                    factor_matrices[factor] = mat.values.astype(float)
+                except Exception:
+                    # Fallback to simple column vector if pivot fails
+                    factor_matrices[factor] = df[[factor]].values.astype(float)
+
+            # Robust Cronbach's alpha per factor (capped at 0.95)
+            alphas: Dict[str, float] = {}
+            for factor, mat in factor_matrices.items():
+                try:
+                    a = float(robust_mod.cronbachs_alpha(mat))
+                    if np.isnan(a):
+                        a = 0.0
+                    a = min(a, 0.95)
+                except Exception:
+                    a = 0.0
+                alphas[factor] = a
+            self._cronbach_alphas = alphas
+
+            # Robust cross-loading ratios across factors
+            try:
+                _, ratio_dict = robust_mod.cross_loadings(factor_matrices)
+                self._clr_scores = {f: float(ratio_dict.get(f, np.nan)) for f in self.factor_columns}
+            except Exception:
+                # Fallback: correlation-based approximation
+                factor_data = df[self.factor_columns].dropna()
+                self._clr_scores = self._calculate_clr_from_correlations(factor_data)
+
+            # Robust HTMT across factor pairs
+            n = len(self.factor_columns)
+            htmt_matrix = np.zeros((n, n))
+            for i in range(n):
+                for j in range(i + 1, n):
+                    f_i = self.factor_columns[i]
+                    f_j = self.factor_columns[j]
+                    try:
+                        val = float(robust_mod.robust_htmt_ratio(factor_matrices[f_i], factor_matrices[f_j]))
+                        if np.isnan(val):
+                            val = 0.0
+                    except Exception:
+                        val = 0.0
+                    htmt_matrix[i, j] = val
+                    htmt_matrix[j, i] = val
+            self._htmt_matrix = htmt_matrix
+
+            # Compute unified reliability score
+            self._reliability_score = self._compute_reliability_score()
+            return
+
+        # Standard (non-robust) calculations
         factor_data = df[self.factor_columns].dropna()
         if len(factor_data) < self.min_items_per_factor:
             warnings.warn(f"Only {len(factor_data)} items available, minimum {self.min_items_per_factor} recommended")
-        
-        self._n_factors = len(self.factor_columns)
-        
-        # Calculate Cronbach's Alpha for each factor
         self._cronbach_alphas = self._calculate_cronbach_alphas(factor_data)
-        
-        # Perform factor analysis for cross-loading ratios
         self._clr_scores = self._calculate_cross_loading_ratios(factor_data)
-        
-        # Calculate HTMT matrix
         self._htmt_matrix = self._calculate_htmt_matrix(factor_data)
-        
-        # Compute unified reliability score
         self._reliability_score = self._compute_reliability_score()
     
     def _detect_factor_columns(self, df: pd.DataFrame) -> List[str]:

@@ -329,7 +329,8 @@ def check_sensitivity_profiles(real_judge_name: str, dataset_id: str) -> Dict[st
 
 def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                               real_judge_name: str,
-                              strict_abb: bool = False) -> Dict[str, Any]:
+                              strict_abb: bool = False,
+                              model_question_mapping: Optional[Dict[str, List[Dict]]] = None) -> Dict[str, Any]:
     """Run Combined A-BB debiasing approaches on the judge data."""
     print(f"\nRunning Combined A-BB analysis for {judge_name}...")
     
@@ -355,15 +356,29 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
     profile_override = {'value': float(ctx)}
     print(f"🚀 Using Context-Adjusted RMS for formatting: {ctx:.4f}")
 
+    # Establish a single, consistent score range from input data and reuse it
+    # Compute across all *_score columns to capture the maximum observed range
+    score_cols_all = [col for col in df.columns if col.endswith('_score')]
+    if score_cols_all:
+        global_min = float(pd.concat([df[c] for c in score_cols_all], axis=0).min())
+        global_max = float(pd.concat([df[c] for c in score_cols_all], axis=0).max())
+        score_min = global_min
+        score_max = global_max
+        score_range = float(score_max - score_min)
+        if score_range <= 0:
+            # Fallback to 1-5 Likert range if degenerate
+            score_min, score_max, score_range = 1.0, 5.0, 4.0
+    else:
+        # Fallback if schema unexpected
+        score_min, score_max, score_range = 1.0, 5.0, 4.0
+    print(f"   ↪︎ Using unified score scale: min={score_min:.3f}, max={score_max:.3f}, range={score_range:.3f}")
+
     # Compute context-aware static sensitivities (psychometric and schematic)
     factor_columns = [col for col in df.columns if col.endswith('_score') and col != 'overall_score']
-    score_range = float(df['overall_score'].max() - df['overall_score'].min()) if 'overall_score' in df.columns else 4.0
-    if score_range <= 0:
-        score_range = 4.0
 
     # Psychometric
     try:
-        psych_est = PsychometricReliabilitySensitivity(factor_columns=factor_columns)
+        psych_est = PsychometricReliabilitySensitivity(factor_columns=factor_columns, robust=True)
         psych_est.fit(df)
         psych_raw = float(psych_est.estimate(score_range))
     except Exception as e:
@@ -397,8 +412,8 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
         )
         print(f"✅ Successfully created {real_judge_name} judge function")
 
-    # Define Combined A-BB approaches with different aggregation strategies  
-    # Using relaxed tau/delta for conservative strategy to help with constraint satisfaction
+    # Define Combined A-BB approaches with different aggregation strategies
+    # Set smaller tau values (1.0–1.5 range) per request
     # Choose estimator type based on profile availability
     # Use profile-enhanced estimator when we have any profile override or judge-level profile
     # We will pass a fixed combined sensitivity for each strategy
@@ -407,8 +422,8 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
     approaches = {
         'combined_abb_conservative': {
             'estimator': estimator_type,
-            'tau': 3.5,  # Further relaxed tau for conservative strategy (was 3.0)
-            'delta': 0.25,  # Further relaxed delta for conservative strategy (was 0.2)
+            'tau': 2.5,
+            'delta': 0.15,
             'use_average_case': True,
             'extra_params': {
                 # Fixed estimator parameters (set later per-strategy before init)
@@ -417,8 +432,8 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
         },
         'combined_abb_rms': {
             'estimator': estimator_type,
-            'tau': 2.3,  # Further relaxed tau for RMS strategy (was 2.2)
-            'delta': 0.13,  # Further relaxed delta for RMS strategy (was 0.12)
+            'tau': 2.25,
+            'delta': 0.1,
             'use_average_case': True,
             'extra_params': {
                 'fixed_sensitivity_value': None,
@@ -426,11 +441,25 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
         },
         'combined_abb_weighted': {
             'estimator': estimator_type,
-            'tau': 2.2,  # Slightly relaxed tau for weighted strategy (was 2.0)
-            'delta': 0.12,  # Slightly relaxed delta for weighted strategy (was 0.1)
+            'tau': 2.0,
+            'delta': 0.1,
             'use_average_case': True,
             'extra_params': {
                 'fixed_sensitivity_value': None,
+            }
+        },
+        'combined_abb_montecarlo': {
+            'estimator': estimator_type,
+            'tau': 1.5,
+            'delta': 0.1,
+            'use_average_case': True,
+            'extra_params': {
+                'fixed_sensitivity_value': None,
+                'mc_weights': {
+                    'formatting': 1.0/3.0,
+                    'psychometric': 1.0/3.0,
+                    'schematic': 1.0/3.0,
+                }
             }
         }
     }
@@ -466,6 +495,24 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
             elif approach_name == 'combined_abb_rms':
                 import numpy as _np
                 combined_fixed = float(_np.sqrt(_np.mean(_np.square([ctx, psych_ctx, schem_ctx]))))
+            elif approach_name == 'combined_abb_montecarlo':
+                import numpy as _np
+                w = approach_config['extra_params'].get('mc_weights', {}) or {}
+                w_fmt = float(w.get('formatting', 1.0/3.0))
+                w_psy = float(w.get('psychometric', 1.0/3.0))
+                w_sch = float(w.get('schematic', 1.0/3.0))
+                total_w = w_fmt + w_psy + w_sch
+                if total_w <= 0:
+                    w_fmt = w_psy = w_sch = 1.0/3.0
+                    total_w = 1.0
+                w_fmt /= total_w
+                w_psy /= total_w
+                w_sch /= total_w
+                v_fmt = ctx * ctx
+                v_psy = psych_ctx * psych_ctx
+                v_sch = schem_ctx * schem_ctx
+                combined_fixed = float(_np.sqrt(w_fmt * v_fmt + w_psy * v_psy + w_sch * v_sch))
+                print(f"    MC weights: formatting={w_fmt:.3f}, psychometric={w_psy:.3f}, schematic={w_sch:.3f}")
             else:  # weighted: default equal weights
                 combined_fixed = float((ctx + psych_ctx + schem_ctx) / 3.0)
 
@@ -493,9 +540,6 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                 }
             else:
                 # A-BB precheck using normalized sensitivity (no mechanism yet): Δ̂ = Δ / range
-                score_range = float(original_scores.max() - original_scores.min())
-                if score_range <= 0:
-                    score_range = 4.0
                 delta_val = float(approach_config.get('delta', init_params.get('delta', 0.1)))
                 tau_val = float(approach_config.get('tau', init_params.get('tau', 2.0)))
                 precheck = compute_abb_constraint_validation(
@@ -504,7 +548,7 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                 delta_hat = precheck.get('normalized_sensitivity')
                 threshold = precheck.get('constraint_threshold')
                 margin = precheck.get('margin')
-                print(f"    A-BB precheck: tau={tau_val:.3f}, delta={delta_val:.3f}, Δ̂={delta_hat:.4f}, threshold={threshold:.4f}, margin={margin:.4f}")
+                print(f"    A-BB precheck: tau={tau_val:.3f}, delta={delta_val:.3f}, Δ̂={delta_hat:.4f}, threshold={threshold:.4f}, margin={margin:.4f} (range={score_range:.3f})")
                 if strict_abb and float(margin) <= 0.0:
                     msg = (
                         f"Strict mode: A-BB precheck failed (tau={tau_val:.6f} <= threshold={threshold:.6f}); skipping strategy"
@@ -533,9 +577,16 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                 else:
                     debiaser.fit(df)
 
-                # Transform overall scores
-                score_range = float(original_scores.max() - original_scores.min())
-                debiased_scores = debiaser.transform(original_scores)
+                # Align debiaser's internal scale to the unified Likert range for consistent bounds/diagnostics
+                try:
+                    debiaser._score_min = score_min
+                    debiaser._score_max = score_max
+                    debiaser._original_range = score_range
+                except Exception:
+                    pass
+
+                # Transform overall scores using the unified scale
+                debiased_scores = debiaser.transform(original_scores, score_min=score_min, score_max=score_max)
                 
                 # Get bias bounds
                 bias_bounds = debiaser.get_bias_bounds(len(original_scores))
@@ -556,6 +607,7 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                 'strategy': approach_name,
                 'original_scores': [float(x) for x in original_scores.tolist()],
                 'debiased_scores': [float(x) for x in debiased_scores.tolist()],
+                'model_question_data': list(zip(df['model'].tolist(), df['question_id'].tolist(), debiased_scores.tolist())),
                 'diagnostics': {
                     'bias_sensitivity': float(diagnostics.get('bias_sensitivity', combined_fixed)) if isinstance(diagnostics, dict) else combined_fixed,
                     'combined_sensitivity': float(diagnostics.get('abb_constraint_validation', {}).get('combined_sensitivity', combined_fixed)) if isinstance(diagnostics, dict) else combined_fixed,
@@ -599,6 +651,16 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                     'dynamic_measurements': measurement_breakdown.get('dynamic_measurements', {}),
                     'combination_strategy': measurement_breakdown.get('combination_strategy')
                 }
+            if approach_name == 'combined_abb_montecarlo':
+                w = approach_config['extra_params'].get('mc_weights', {}) or {}
+                result_data.setdefault('measurement_breakdown', {})
+                result_data['measurement_breakdown'].update({
+                    'monte_carlo_weights': {
+                        'formatting': float(w.get('formatting', 1.0/3.0)),
+                        'psychometric': float(w.get('psychometric', 1.0/3.0)),
+                        'schematic': float(w.get('schematic', 1.0/3.0)),
+                    }
+                })
             
             # Add judge cost information if using real judge
             if hasattr(judge_function, 'interface'):
@@ -679,6 +741,57 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
     
     return results
 
+def save_debiased_scores(base_path: Path, judge_name: str, approach_results: Dict[str, Any]):
+    """Save debiased scores to individual model JSONL files in per-setting directories."""
+    
+    # For each successful approach, create directory and save files
+    for approach_name, approach_data in approach_results.items():
+        if approach_data.get('success', False):
+            # Create directory for this setting and approach
+            # e.g., "sos-addl-data/InDepthAnalysis/DeepSeek-R1-32B-setting1/base_debiased"
+            debiased_dir = base_path / judge_name / "base_debiased"
+            debiased_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Extract model-question-score data
+            model_question_data = approach_data.get('model_question_data', [])
+            
+            # Group by model
+            from collections import defaultdict
+            model_scores = defaultdict(list)
+            for model, question_id, score in model_question_data:
+                model_scores[model].append({
+                    "question_id": question_id,
+                    "score_debiased": float(score)
+                })
+            
+            # Save each model's scores to a JSONL file
+            for model_name, scores in model_scores.items():
+                output_file = debiased_dir / f"{model_name}.jsonl"
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    for score_entry in scores:
+                        json.dump(score_entry, f, ensure_ascii=False)
+                        f.write('\n')
+                
+                print(f"  📝 Saved {len(scores)} debiased scores for {model_name} to {output_file}")
+            
+            # Save approach metadata
+            metadata_file = debiased_dir / f"debiasing_metadata_{approach_name}.json"
+            metadata = {
+                'approach': approach_name,
+                'judge': judge_name,
+                'n_samples': approach_data.get('n_samples'),
+                'diagnostics': approach_data.get('diagnostics'),
+                'validation': approach_data.get('validation')
+            }
+            with open(metadata_file, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2, ensure_ascii=False)
+            
+            print(f"  📝 Saved metadata for {approach_name} to {metadata_file}")
+            
+            # For now, only save the first successful approach
+            # (you can modify this to save all approaches in separate subdirectories if needed)
+            break
+
 def main(args):
     """Main execution function."""
     print("🚀 Running Combined A-BB Debiasing Analysis")
@@ -735,7 +848,10 @@ def main(args):
                 df, judge_name, real_judge_name=judge_to_use, strict_abb=bool(getattr(args, 'strict_abb', False))
             )
             
-            # Store results
+            # Save debiased scores to individual model JSONL files
+            save_debiased_scores(base_path, judge_name, analysis_results)
+            
+            # Store results (keep for summary/compatibility)
             overall_results[judge_name] = {
                 'data_source': str(judge_dir),
                 'n_samples': len(df),
@@ -752,9 +868,33 @@ def main(args):
                 'data_source': str(judge_dir)
             }
     
-    # Save overall results
+    # Save overall results summary (without individual scores)
     output_file = base_path / "combined_abb_analysis_results.json"
-    rounded_results = _round_nested(overall_results, sig=3)
+    
+    # Create summary without individual scores
+    summary_results = {}
+    for judge_name, judge_data in overall_results.items():
+        summary_results[judge_name] = {
+            'data_source': judge_data.get('data_source'),
+            'n_samples': judge_data.get('n_samples')
+        }
+        
+        if 'error' in judge_data:
+            summary_results[judge_name]['error'] = judge_data['error']
+        
+        if 'approaches' in judge_data:
+            summary_approaches = {}
+            for approach_name, approach_data in judge_data['approaches'].items():
+                if isinstance(approach_data, dict):
+                    # Remove large data arrays
+                    summary_approach = {k: v for k, v in approach_data.items() 
+                                     if k not in ['original_scores', 'debiased_scores', 'model_question_data']}
+                    summary_approaches[approach_name] = summary_approach
+                else:
+                    summary_approaches[approach_name] = approach_data
+            summary_results[judge_name]['approaches'] = summary_approaches
+    
+    rounded_results = _round_nested(summary_results, sig=3)
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(rounded_results, f, indent=2, ensure_ascii=False)
     
