@@ -29,6 +29,28 @@ from differential_debiasing.core.sensitivity_profiles import (
     SensitivityProfileManager,
 )
 from differential_debiasing.core.utils import context_adjusted_rms, compute_abb_constraint_validation
+
+# --- Local helpers -----------------------------------------------------------
+def _round_sig(x: float, sig: int = 3) -> float:
+    try:
+        import math
+        if x == 0 or not math.isfinite(float(x)):
+            return float(x)
+        return float(round(x, sig - int(math.floor(math.log10(abs(x)))) - 1))
+    except Exception:
+        return float(x)
+
+def _round_nested(obj, sig: int = 3):
+    # Recursively round floats in nested structures to sig significant digits
+    import numbers
+    if isinstance(obj, float):
+        return _round_sig(obj, sig)
+    if isinstance(obj, list):
+        return [_round_nested(v, sig) for v in obj]
+    if isinstance(obj, dict):
+        return {k: _round_nested(v, sig) for k, v in obj.items()}
+    # Leave ints, bools, None, strings as-is
+    return obj
 from differential_debiasing.sensitivity.psychometric_reliability import PsychometricReliabilitySensitivity
 from differential_debiasing.sensitivity.schematic_adherence import SchematicAdherenceSensitivity
 # Note: Oumi judge interface is imported lazily only when needed
@@ -541,6 +563,9 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                     'context_adjusted_formatting_rms': float(profile_info['context_adjusted_rms']) if profile_info.get('context_adjusted_rms') is not None else None,
                     'context_adjust_intrinsic_rms': float(profile_info['intrinsic_sensitivity']) if profile_info.get('intrinsic_sensitivity') is not None else None,
                     'formatting_profile_rms': float(profile_info['formatting_sensitivity']) if profile_info.get('formatting_sensitivity') is not None else None,
+                    # Save context-aware static sensitivities used in combination
+                    'psychometric_context_rms': float(psych_ctx),
+                    'schematic_context_rms': float(schem_ctx),
                     # hamming_profile_rms omitted in this script
                     'intrinsic_profile_rms': float(profile_info['intrinsic_sensitivity']) if profile_info.get('intrinsic_sensitivity') is not None else None,
                     'tau': float(bias_bounds['tau']),
@@ -729,8 +754,9 @@ def main(args):
     
     # Save overall results
     output_file = base_path / "combined_abb_analysis_results.json"
+    rounded_results = _round_nested(overall_results, sig=3)
     with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(overall_results, f, indent=2, ensure_ascii=False)
+        json.dump(rounded_results, f, indent=2, ensure_ascii=False)
     
     # Print summary
     print()
