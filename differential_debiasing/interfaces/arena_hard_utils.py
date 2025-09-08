@@ -491,7 +491,8 @@ def convert_scores_to_win_rates(model_scores: pd.DataFrame,
 def bootstrap_to_win_rate_ci(model_scores: pd.DataFrame,
                              score_column: str = 'score',
                              baseline_model: str = 'gpt-4-0314',
-                             confidence_level: float = 0.95) -> pd.DataFrame:
+                             confidence_level: float = 0.95,
+                             reference_raw_scores: Optional[Dict[str, float]] = None) -> pd.DataFrame:
     """
     Convert confidence intervals to win rate scale using the Arena-Hard method.
     
@@ -520,14 +521,50 @@ def bootstrap_to_win_rate_ci(model_scores: pd.DataFrame,
         df[f'{score_column}_CI'] = '(-0.00, +0.00)'
         return df
     
-    # Create DataFrames for lower and upper bounds with the bounds as the score
-    lower_df = df[['model', ci_lower_col]].copy()
-    lower_df = lower_df.rename(columns={ci_lower_col: score_column})
-    lower_df = convert_scores_to_win_rates(lower_df, score_column=score_column, baseline_model=baseline_model)
-    
-    upper_df = df[['model', ci_upper_col]].copy()
-    upper_df = upper_df.rename(columns={ci_upper_col: score_column})
-    upper_df = convert_scores_to_win_rates(upper_df, score_column=score_column, baseline_model=baseline_model)
+    if reference_raw_scores is None:
+        # Backward-compatible behavior: broadcast conversion of bounds
+        lower_df = df[['model', ci_lower_col]].copy()
+        lower_df = lower_df.rename(columns={ci_lower_col: score_column})
+        lower_df = convert_scores_to_win_rates(lower_df, score_column=score_column, baseline_model=baseline_model)
+        
+        upper_df = df[['model', ci_upper_col]].copy()
+        upper_df = upper_df.rename(columns={ci_upper_col: score_column})
+        upper_df = convert_scores_to_win_rates(upper_df, score_column=score_column, baseline_model=baseline_model)
+    else:
+        # Fixed-context conversion: hold all other models at central raw scores
+        # Build central mapping once from reference_raw_scores
+        base_raw = dict(reference_raw_scores)
+        base_elo = raw_scores_to_elo(base_raw, baseline_model=baseline_model)
+        base_wr = get_win_rate_column(base_elo, baseline=baseline_model)
+        # Prepare outputs
+        lower_wr_list = []
+        upper_wr_list = []
+        # Iterate per model; for each, replace only that model's raw score with bound
+        for idx, row in df.iterrows():
+            model = row['model']
+            # Lower
+            raw_lower = row[ci_lower_col]
+            raw_dict_lower = dict(base_raw)
+            raw_dict_lower[model] = raw_lower
+            elo_lower = raw_scores_to_elo(raw_dict_lower, baseline_model=baseline_model)
+            wr_lower = get_win_rate_column(elo_lower, baseline=baseline_model)[model]
+            lower_wr_list.append(wr_lower)
+            # Upper
+            raw_upper = row[ci_upper_col]
+            raw_dict_upper = dict(base_raw)
+            raw_dict_upper[model] = raw_upper
+            elo_upper = raw_scores_to_elo(raw_dict_upper, baseline_model=baseline_model)
+            wr_upper = get_win_rate_column(elo_upper, baseline=baseline_model)[model]
+            upper_wr_list.append(wr_upper)
+        # Build DataFrames similar to previous outputs
+        lower_df = pd.DataFrame({
+            'model': df['model'].values,
+            score_column: np.array(lower_wr_list, dtype=float)
+        })
+        upper_df = pd.DataFrame({
+            'model': df['model'].values,
+            score_column: np.array(upper_wr_list, dtype=float)
+        })
     
     # The main scores should already be converted
     # Calculate deltas from the converted score
