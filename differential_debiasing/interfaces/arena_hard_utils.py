@@ -9,6 +9,8 @@ Utilities for working with Arena-Hard(-Auto) data:
 from __future__ import annotations
 
 import re
+import numpy as np
+import pandas as pd
 from typing import Optional, Tuple, Dict, Any, Iterable, Union, List
 from pathlib import Path
 
@@ -289,4 +291,261 @@ def find_sample_data(base_path: Union[str, Path], judge_name: str, max_samples: 
 
     df = pd.DataFrame(sample_rows)
     print(f"✅ Found {len(df)} sample evaluations across {df['model'].nunique()} models")
+    return df
+
+
+def raw_scores_to_elo(scores: Dict[str, float], 
+                      scale: float = 400.0, 
+                      base: float = 10.0, 
+                      init_rating: float = 1000.0,
+                      baseline_model: str = "gpt-4-0314") -> Dict[str, float]:
+    """
+    Convert raw scores (e.g., 1-10 scale) to ELO ratings.
+    
+    This is a simplified conversion that assumes scores map to win probabilities.
+    For a score on 1-10 scale, we treat it as: win_prob = (score - 1) / 9
+    
+    Parameters:
+    -----------
+    scores : Dict mapping model names to raw scores
+    scale : ELO scale parameter (default 400)
+    base : ELO base parameter (default 10)
+    init_rating : Initial ELO rating (default 1000)
+    baseline_model : Model to use as baseline (default gpt-4-0314)
+    
+    Returns:
+    --------
+    Dict mapping model names to ELO ratings
+    """
+    # Convert scores to win probabilities (assuming 1-10 scale)
+    # Adjust this mapping based on your actual score range
+    win_probs = {}
+    
+    # Convert all scores to float first
+    scores_float = {}
+    for model, score in scores.items():
+        try:
+            scores_float[model] = float(score)
+        except (ValueError, TypeError):
+            raise ValueError(f"Cannot convert score '{score}' for model '{model}' to float. "
+                           f"Score type: {type(score)}, value: {repr(score)}")
+    
+    score_values = list(scores_float.values())
+    
+    # Detect score range
+    min_score = min(score_values)
+    max_score = max(score_values)
+    
+    # Handle case where all scores are the same
+    if max_score == min_score:
+        return {model: init_rating for model in scores_float}
+    
+    # Normalize to 0-1 win probability
+    for model, score in scores_float.items():
+        # Linear mapping from score range to win probability
+        win_probs[model] = (score - min_score) / (max_score - min_score)
+    
+    # Convert win probabilities to ELO differences
+    elo_ratings = {}
+    
+    # If baseline model exists, use it as anchor
+    if baseline_model in scores_float:
+        baseline_prob = win_probs[baseline_model]
+        
+        for model, prob in win_probs.items():
+            if model == baseline_model:
+                elo_ratings[model] = init_rating
+            else:
+                # ELO difference formula: ΔR = scale * log_base(p/(1-p))
+                # where p is win probability of model vs baseline
+                if prob == 1.0:
+                    prob = 0.9999  # Avoid log(inf)
+                if prob == 0.0:
+                    prob = 0.0001  # Avoid log(0)
+                
+                # Calculate relative win probability
+                p_vs_baseline = prob / (prob + baseline_prob)
+                
+                # Clamp to avoid division by zero or log(0)
+                p_vs_baseline = max(0.001, min(0.999, p_vs_baseline))
+                
+                elo_diff = scale * np.log(p_vs_baseline / (1 - p_vs_baseline)) / np.log(base)
+                elo_ratings[model] = init_rating + elo_diff
+    else:
+        # No baseline model - distribute ELO ratings proportionally
+        # Map probabilities to ELO range centered at init_rating
+        for model, prob in win_probs.items():
+            # Map [0, 1] to approximately [-400, +400] ELO range
+            elo_ratings[model] = init_rating + scale * (prob - 0.5)
+    
+    return elo_ratings
+
+
+def predict_win_rate(elo_ratings: Dict[str, float], 
+                     scale: float = 400.0, 
+                     base: float = 10.0) -> pd.DataFrame:
+    """
+    Calculate pairwise win rates from ELO ratings.
+    
+    Parameters:
+    -----------
+    elo_ratings : Dict mapping model names to ELO ratings
+    scale : ELO scale parameter (default 400)
+    base : ELO base parameter (default 10)
+    
+    Returns:
+    --------
+    DataFrame with win rates for each model pair
+    """
+    names = sorted(list(elo_ratings.keys()))
+    wins = {}
+    
+    for a in names:
+        wins[a] = {}
+        for b in names:
+            if a == b:
+                wins[a][b] = np.nan
+            else:
+                # ELO win probability formula
+                ea = 1 / (1 + base ** ((elo_ratings[b] - elo_ratings[a]) / scale))
+                wins[a][b] = ea
+
+    df = pd.DataFrame(wins)
+    df.index.name = "model_a"
+    df.columns.name = "model_b"
+    return df.T
+
+
+def get_win_rate_column(elo_ratings: Dict[str, float], 
+                        baseline: str = "gpt-4-0314",
+                        scale: float = 400.0,
+                        base: float = 10.0) -> Dict[str, float]:
+    """
+    Get win rates against a baseline model, scaled to 0-100.
+    
+    Parameters:
+    -----------
+    elo_ratings : Dict mapping model names to ELO ratings
+    baseline : Baseline model name
+    scale : ELO scale parameter
+    base : ELO base parameter
+    
+    Returns:
+    --------
+    Dict mapping model names to win rates (0-100 scale) vs baseline
+    """
+    win_rate_table = predict_win_rate(elo_ratings, scale, base)
+    
+    if baseline not in win_rate_table.columns:
+        # If baseline not found, return normalized scores
+        print(f"Warning: Baseline model {baseline} not found. Using normalized scores.")
+        max_elo = max(elo_ratings.values())
+        min_elo = min(elo_ratings.values())
+        range_elo = max_elo - min_elo if max_elo != min_elo else 1
+        
+        return {
+            model: round(50 + 40 * (elo - (max_elo + min_elo) / 2) / range_elo, 2)
+            for model, elo in elo_ratings.items()
+        }
+    
+    win_rates = win_rate_table[baseline].fillna(0.5)
+    return {model: round(rate * 100, 2) for model, rate in win_rates.items()}
+
+
+def convert_scores_to_win_rates(model_scores: pd.DataFrame,
+                                score_column: str = 'score',
+                                baseline_model: str = 'gpt-4-0314') -> pd.DataFrame:
+    """
+    Convert a DataFrame with model scores to win rates on 0-100 scale.
+    
+    Parameters:
+    -----------
+    model_scores : DataFrame with columns ['model', score_column, ...]
+    score_column : Name of the column containing scores to convert
+    baseline_model : Model to use as baseline (50.0 win rate)
+    
+    Returns:
+    --------
+    DataFrame with score_column values replaced by win rates
+    """
+    # Create score dictionary
+    scores_dict = model_scores.set_index('model')[score_column].to_dict()
+    
+    # Convert to ELO ratings
+    elo_ratings = raw_scores_to_elo(scores_dict, baseline_model=baseline_model)
+    
+    # Convert to win rates
+    win_rates = get_win_rate_column(elo_ratings, baseline=baseline_model)
+    
+    # Update DataFrame
+    result_df = model_scores.copy()
+    result_df[score_column] = result_df['model'].map(win_rates)
+    
+    # Ensure baseline model has exactly 50.0 if it exists
+    if baseline_model in result_df['model'].values:
+        result_df.loc[result_df['model'] == baseline_model, score_column] = 50.0
+    
+    return result_df
+
+
+def bootstrap_to_win_rate_ci(model_scores: pd.DataFrame,
+                             score_column: str = 'score',
+                             baseline_model: str = 'gpt-4-0314',
+                             confidence_level: float = 0.95) -> pd.DataFrame:
+    """
+    Convert confidence intervals to win rate scale using the Arena-Hard method.
+    
+    This converts the CI bounds (lower and upper) to win rates independently,
+    then formats them as deltas from the center score.
+    
+    Parameters:
+    -----------
+    model_scores : DataFrame with columns ['model', score_column, f'{score_column}_CI_lower', f'{score_column}_CI_upper']
+    score_column : Name of the score column
+    baseline_model : Baseline model for win rate calculation
+    confidence_level : Confidence level (not used, kept for compatibility)
+    
+    Returns:
+    --------
+    DataFrame with updated CI column in win rate scale
+    """
+    df = model_scores.copy()
+    
+    # Check if we have the numeric CI bounds
+    ci_lower_col = f'{score_column}_CI_lower'
+    ci_upper_col = f'{score_column}_CI_upper'
+    
+    if ci_lower_col not in df.columns or ci_upper_col not in df.columns:
+        # If no CI bounds, return with default CI
+        df[f'{score_column}_CI'] = '(-0.00, +0.00)'
+        return df
+    
+    # Create DataFrames for lower and upper bounds with the bounds as the score
+    lower_df = df[['model', ci_lower_col]].copy()
+    lower_df = lower_df.rename(columns={ci_lower_col: score_column})
+    lower_df = convert_scores_to_win_rates(lower_df, score_column=score_column, baseline_model=baseline_model)
+    
+    upper_df = df[['model', ci_upper_col]].copy()
+    upper_df = upper_df.rename(columns={ci_upper_col: score_column})
+    upper_df = convert_scores_to_win_rates(upper_df, score_column=score_column, baseline_model=baseline_model)
+    
+    # The main scores should already be converted
+    # Calculate deltas from the converted score
+    ci_strings = []
+    for idx, row in df.iterrows():
+        score = row[score_column]
+        lower = lower_df.loc[idx, score_column]
+        upper = upper_df.loc[idx, score_column]
+        
+        # Format as deltas
+        lower_delta = lower - score
+        upper_delta = upper - score
+        ci_strings.append(f"({lower_delta:.2f}, +{upper_delta:.2f})")
+    
+    df[f'{score_column}_CI'] = ci_strings
+    
+    # Also update the numeric bounds
+    df[ci_lower_col] = lower_df[score_column]
+    df[ci_upper_col] = upper_df[score_column]
+    
     return df

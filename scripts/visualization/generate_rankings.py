@@ -20,8 +20,40 @@ from data_loader import (
     get_project_paths, 
     load_judge_data_for_visualization,
     create_ranking_dataframe,
-    aggregate_scores_by_model
+    aggregate_scores_by_model,
+    detect_baseline_model
 )
+
+# Import arena hard utilities for score conversion
+sys.path.append(str(Path(__file__).parent.parent.parent / 'differential_debiasing' / 'interfaces'))
+from arena_hard_utils import bootstrap_to_win_rate_ci
+
+
+def _copy_elo_csvs(judge_dir: Path, strategy: str, baseline: str) -> bool:
+    """Copy ELO CSVs (if present) into the expected factor_scores_updated_cis/ directory with naming compatible with visualizer."""
+    elo_dir = judge_dir / f"tables_debiased_{strategy}" / "tables" / "factor_scores_updated_cis_elo"
+    if not elo_dir.exists():
+        return False
+    target_dir = judge_dir / f"tables_debiased_{strategy}" / "tables" / "factor_scores_updated_cis"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for csv in elo_dir.glob("*.csv"):
+        try:
+            df = pd.read_csv(csv)
+            # Derive metric name from columns: pick first *_score column or 'score'
+            metric_col = None
+            for c in df.columns:
+                if c.endswith('_score') or c == 'score':
+                    metric_col = c
+                    break
+            metric_name = (metric_col or 'score').replace('_score','')
+            # Build filename compatible with loader's regex
+            out_name = f"arena_hard_leaderboard_elo_{judge_dir.name}_judge_{baseline}_base_{metric_name}_score_factor_{strategy}.csv"
+            df.to_csv(target_dir / out_name, index=False)
+            copied += 1
+        except Exception:
+            continue
+    return copied > 0
 
 def load_combined_abb_results(results_file: Path) -> Dict:
     """Load Combined A-BB analysis results."""
@@ -104,8 +136,12 @@ def save_rankings_for_judge_from_jsonl(judge_name: str, output_base_path: Path, 
         print(f"Judge directory not found: {judge_dir}")
         return
         
+    # Determine baseline model dynamically
+    baseline_model = detect_baseline_model(judge_dir) or 'gpt-4-0314'
+    
     # Load the data
     try:
+        # Use loader's conversion to win-rate and CI; do not reconvert here
         judge_data = load_judge_data_for_visualization(judge_dir)
     except Exception as e:
         print(f"Error loading judge data: {e}")
@@ -121,7 +157,14 @@ def save_rankings_for_judge_from_jsonl(judge_name: str, output_base_path: Path, 
             approach_dir = judge_dir / f"tables_debiased_{clean_approach}"
             ranking_dir = approach_dir / "tables" / "factor_scores_updated_cis"
             ranking_dir.mkdir(parents=True, exist_ok=True)
-            
+
+            # Require ELO CSVs for this strategy; no fallback to aggregate path
+            if _copy_elo_csvs(judge_dir, clean_approach, baseline_model):
+                print(f"    Found ELO bootstrap CSVs. Copied into factor_scores_updated_cis/")
+                continue
+            else:
+                raise RuntimeError(f"No ELO CSVs found for strategy '{clean_approach}' under {judge_dir}. Run generate_debiased_rankings_elo.py first.")
+
             # Get aggregated data
             agg_df = judge_data['aggregated']
             
@@ -153,6 +196,49 @@ def save_rankings_for_judge_from_jsonl(judge_name: str, output_base_path: Path, 
                     # Ensure original scores for comparison reflect the factor
                     if col_name in agg_df.columns and 'original_score' not in ranking_df.columns:
                         ranking_df['original_score'] = agg_df.loc[ranking_df.index, col_name]
+                    
+                    # Update confidence intervals using precomputed numeric bounds from aggregated_df (already win-rate)
+                    # Prefer original factor CI bounds to match Arena-Hard widths
+                    orig_ci_lower_col = f'{col_name}_CI_lower'
+                    orig_ci_upper_col = f'{col_name}_CI_upper'
+                    deb_ci_lower_col = f'{debiased_col}_CI_lower'
+                    deb_ci_upper_col = f'{debiased_col}_CI_upper'
+                    if orig_ci_lower_col in agg_df.columns and orig_ci_upper_col in agg_df.columns:
+                        lower_map = dict(zip(agg_df['model'], agg_df[orig_ci_lower_col]))
+                        upper_map = dict(zip(agg_df['model'], agg_df[orig_ci_upper_col]))
+                    elif deb_ci_lower_col in agg_df.columns and deb_ci_upper_col in agg_df.columns:
+                        lower_map = dict(zip(agg_df['model'], agg_df[deb_ci_lower_col]))
+                        upper_map = dict(zip(agg_df['model'], agg_df[deb_ci_upper_col]))
+                    else:
+                        lower_map = upper_map = None
+                    if lower_map is not None:
+                        ranking_df['rating_q025'] = ranking_df['model'].map(lower_map)
+                        ranking_df['rating_q975'] = ranking_df['model'].map(upper_map)
+                        # Build CI deltas from center score
+                        ranking_df['CI'] = ranking_df.apply(
+                            lambda r: f"({(r['rating_q025'] - r['score']):.2f}, +{(r['rating_q975'] - r['score']):.2f})",
+                            axis=1
+                        )
+                    else:
+                        ranking_df['rating_q025'] = ranking_df['score']
+                        ranking_df['rating_q975'] = ranking_df['score']
+                        ranking_df['CI'] = "(-0.00, +0.00)"
+                    ranking_df['avg_tokens'] = 0.0  # Placeholder
+                    ranking_df['date'] = '2025-01-09'
+                    
+                    # Reorder columns to match expected format
+                    col_order = ['model', 'score', 'rating_q025', 'rating_q975', 'CI', 'avg_tokens', 'date']
+                    # Add any additional columns that exist
+                    for col in ranking_df.columns:
+                        if col not in col_order:
+                            col_order.append(col)
+                    
+                    # Rename score column to match the factor name
+                    score_col_name = score_name.replace('_score', '') + '_score' if score_name != 'score' else 'score'
+                    ranking_df = ranking_df.rename(columns={'score': score_col_name})
+                    col_order[1] = score_col_name
+                    
+                    ranking_df = ranking_df[col_order]
                     
                     # Generate filename
                     factor_part = f"_{score_name.replace('_score', '')}" if score_name != 'score' else ""

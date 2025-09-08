@@ -21,11 +21,130 @@ warnings.filterwarnings('ignore')
 # Import data loader utilities
 from data_loader import get_project_paths, load_judge_data_for_visualization
 
+# --- Model name normalization -------------------------------------------------
+def normalize_model_name(name: str) -> str:
+    """Normalize model names so originals and ELO outputs align.
+
+    Rules:
+    - Drop HF org prefixes like "org/model" -> "model" (keep suffix after last '/').
+    - Strip whitespace; collapse multiple spaces; replace spaces with '-'.
+    - Preserve case and punctuation (hyphens/underscores) to match common naming.
+    """
+    if not isinstance(name, str):
+        return str(name)
+    s = name.strip()
+    if '/' in s:
+        s = s.split('/')[-1]
+    # Collapse whitespace and replace with '-'
+    s = '-'.join(s.split())
+    return s
+
 def _pick_first_existing(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     for c in candidates:
         if c in df.columns:
             return c
     return None
+
+# --- ELO metric discovery -----------------------------------------------------
+def discover_debiased_metrics(elo_debiased_dir: Path) -> Dict[str, Path]:
+    """Discover available debiased ELO metrics by scanning filenames.
+
+    Expected pattern: arena_hard_leaderboard_debiased_<baseline>_<metric>_elo.csv
+    Returns a mapping: metric -> csv path
+    """
+    mapping: Dict[str, Path] = {}
+    for p in elo_debiased_dir.glob('*.csv'):
+        name = p.name
+        if 'factor_reliability' in name:
+            continue
+        m = re.match(r'^arena_hard_leaderboard_debiased_.*?_(.+?)_elo\.csv$', name)
+        if m:
+            metric = m.group(1)
+            mapping[metric] = p
+    return mapping
+
+
+def try_load_from_csv(judge_dir: Path, output_dir: Path) -> Optional[Dict[str, Dict[str, pd.DataFrame]]]:
+    """Try to load ranking data from CSV files that have proper CIs."""
+    
+    # Extract approach from output_dir name
+    output_name = output_dir.name
+    approach = None
+    for strategy in ['conservative', 'rms', 'weighted', 'montecarlo', 'formatting_only']:
+        if strategy in output_name:
+            approach = strategy
+            break
+    
+    if not approach:
+        print("Could not determine approach from output directory name")
+        return None
+    
+    # Look for CSV files
+    original_csv_dir = judge_dir / 'tables' / 'factor_scores_original_cis'
+    debiased_csv_dir = judge_dir / f'tables_debiased_{approach}' / 'tables' / 'factor_scores_updated_cis'
+    
+    if not original_csv_dir.exists() or not debiased_csv_dir.exists():
+        print(f"CSV directories not found: {original_csv_dir} or {debiased_csv_dir}")
+        return None
+    
+    # Load CSV files
+    original_data = {}
+    debiased_data = {}
+    
+    # Map factor names to file patterns
+    factor_map = {
+        'score': '_base_score_factor',
+        'correctness_score': '_base_correctness_score_factor',
+        'completeness_score': '_base_completeness_score_factor',
+        'safety_score': '_base_safety_score_factor',
+        'conciseness_score': '_base_conciseness_score_factor',
+        'style_score': '_base_style_score_factor'
+    }
+    
+    for metric, pattern in factor_map.items():
+        # Find original CSV
+        original_files = list(original_csv_dir.glob(f'*{pattern}*.csv'))
+        if original_files:
+            try:
+                df = pd.read_csv(original_files[0])
+                # Rename score column to match metric name
+                score_col = None
+                for col in df.columns:
+                    if col.endswith('_score') or col == 'score':
+                        score_col = col
+                        break
+                if score_col and score_col != 'score':
+                    df = df.rename(columns={score_col: 'score'})
+                
+                original_data[metric] = df
+                print(f"Loaded original CSV for {metric}")
+            except Exception as e:
+                print(f"Error loading original CSV for {metric}: {e}")
+        
+        # Find debiased CSV
+        debiased_files = list(debiased_csv_dir.glob(f'*{pattern}*{approach}.csv'))
+        if debiased_files:
+            try:
+                df = pd.read_csv(debiased_files[0])
+                # Rename score column to match metric name
+                score_col = None
+                for col in df.columns:
+                    if col.endswith('_score') or col == 'score':
+                        score_col = col
+                        break
+                if score_col and score_col != 'score':
+                    df = df.rename(columns={score_col: 'score'})
+                
+                debiased_data[metric] = df
+                print(f"Loaded debiased CSV for {metric}")
+            except Exception as e:
+                print(f"Error loading debiased CSV for {metric}: {e}")
+    
+    if original_data and debiased_data:
+        return {'original': original_data, 'debiased': debiased_data}
+    
+    return None
+
 
 def load_ranking_data(rankings_input: Union[Path, Dict[str, pd.DataFrame]]) -> Dict[str, pd.DataFrame]:
     """Load all ranking CSV files from a directory or use provided DataFrames."""
@@ -51,13 +170,18 @@ def load_ranking_data(rankings_input: Union[Path, Dict[str, pd.DataFrame]]) -> D
         # Extract metric name from filename
         # Pattern: arena_hard_leaderboard_*_base_METRIC_factor*.csv
         filename = csv_file.name
-        
-        # Find the metric name between "base_" and "_factor"
+        # Try: old base_*_factor pattern
+        metric = None
         match = re.search(r'base_(.+?)_factor', filename)
         if match:
             metric = match.group(1)
-        else:
-            # Fallback: use filename without extensions
+        # Try: ELO pattern arena_hard_leaderboard_debiased_<baseline>_<metric>_elo.csv
+        if metric is None:
+            m2 = re.match(r'arena_hard_leaderboard_debiased_.*_(.+)_elo\.csv', filename)
+            if m2:
+                metric = m2.group(1)
+        # Fallback: use last token (may be 'elo')
+        if metric is None:
             metric = csv_file.stem.split('_')[-1]
         
         try:
@@ -65,6 +189,16 @@ def load_ranking_data(rankings_input: Union[Path, Dict[str, pd.DataFrame]]) -> D
             # Coerce common schema variants
             model_col = _pick_first_existing(df, ['model', 'model_id', 'model_name', 'Model', 'name'])
             score_col = _pick_first_existing(df, ['score', 'rating', 'rating_mean', 'rating_median', 'overall_score'])
+            # If not found, try metric-specific column name (e.g., 'completeness_score')
+            if not score_col and metric and metric in df.columns:
+                score_col = metric
+            # If still not found, try any single column that endswith '_score'
+            if not score_col:
+                score_cols = [c for c in df.columns if isinstance(c, str) and c.endswith('_score')]
+                if len(score_cols) == 1:
+                    score_col = score_cols[0]
+                elif len(score_cols) > 1 and metric and f"{metric}" in score_cols:
+                    score_col = metric
             if model_col and score_col:
                 if model_col != 'model':
                     df = df.rename(columns={model_col: 'model'})
@@ -72,7 +206,7 @@ def load_ranking_data(rankings_input: Union[Path, Dict[str, pd.DataFrame]]) -> D
                     df = df.rename(columns={score_col: 'score'})
                 candidates.setdefault(metric, []).append(df)
             else:
-                print(f"Warning: {csv_file} missing model/score columns; skipping")
+                print(f"Warning: {csv_file} missing model/score columns after detection; columns present: {list(df.columns)}; skipping")
         except Exception as e:
             print(f"Error loading {csv_file}: {e}")
     # Choose best candidate per metric
@@ -147,25 +281,37 @@ def create_line_plot_comparison(original_data: Dict[str, pd.DataFrame],
         if 'CI' not in orig_df.columns:
             orig_df['CI'] = ['(0.00, +0.00)'] * len(orig_df)
     
-    # Merge dataframes on model name
+    # Merge dataframes on normalized model name
     # Ensure CI column exists for merge convenience
     if 'CI' not in orig_df.columns:
         orig_df['CI'] = ['(0.00, +0.00)'] * len(orig_df)
     if 'CI' not in debiased_df.columns:
         debiased_df['CI'] = ['(0.00, +0.00)'] * len(debiased_df)
 
-    merged = pd.merge(orig_df[['model', 'score', 'CI']], 
-                       debiased_df[['model', 'score', 'CI']], 
-                       on='model', suffixes=('_orig', '_debiased'))
+    # Build normalized keys and deduplicate by key
+    orig_df = orig_df.copy()
+    debiased_df = debiased_df.copy()
+    orig_df['model_key'] = orig_df['model'].apply(normalize_model_name)
+    debiased_df['model_key'] = debiased_df['model'].apply(normalize_model_name)
+    orig_df = orig_df.drop_duplicates('model_key', keep='first')
+    debiased_df = debiased_df.drop_duplicates('model_key', keep='first')
+
+    merged = pd.merge(orig_df[['model_key', 'model', 'score', 'CI']], 
+                       debiased_df[['model_key', 'model', 'score', 'CI']], 
+                       on='model_key', suffixes=('_orig', '_debiased'))
     if len(merged) == 0 and 'original_score' in debiased_df.columns:
         # Rebuild original from debiased CSV
         print("  ↪︎ No overlap; rebuilding original from debiased original_score")
         orig_df = debiased_df[['model', 'original_score']].rename(columns={'original_score': 'score'}).copy()
         if 'CI' not in orig_df.columns:
             orig_df['CI'] = ['(0.00, +0.00)'] * len(orig_df)
-        merged = pd.merge(orig_df[['model', 'score', 'CI']],
-                          debiased_df[['model', 'score', 'CI']],
-                          on='model', suffixes=('_orig', '_debiased'))
+        orig_df['model_key'] = orig_df['model'].apply(normalize_model_name)
+        debiased_df['model_key'] = debiased_df['model'].apply(normalize_model_name)
+        orig_df = orig_df.drop_duplicates('model_key', keep='first')
+        debiased_df = debiased_df.drop_duplicates('model_key', keep='first')
+        merged = pd.merge(orig_df[['model_key', 'model', 'score', 'CI']],
+                          debiased_df[['model_key', 'model', 'score', 'CI']],
+                          on='model_key', suffixes=('_orig', '_debiased'))
         if len(merged) == 0:
             print(f"Warning: No common models found for {metric} even after rebuild")
             return
@@ -209,9 +355,12 @@ def create_line_plot_comparison(original_data: Dict[str, pd.DataFrame],
     plt.title(f'Ranking Transformation: {metric.replace("_", " ").title()}\n'
               f'Original vs Debiased Judge Evaluations', fontsize=14, fontweight='bold')
     
-    # Set x-axis labels - only strip \n characters and replace / with _
+    # Set x-axis labels - use debiased model names; strip \n and replace '/' with '_'
     model_labels = []
-    for name in merged['model']:
+    name_series = merged['model_debiased'] if 'model_debiased' in merged.columns else (
+        merged['model'] if 'model' in merged.columns else pd.Series([''] * len(merged))
+    )
+    for name in name_series:
         # Only strip \n characters and replace / with _
         clean_name = name.replace('\\n', '').replace('\n', '').replace('/', '_')
         model_labels.append(clean_name)
@@ -257,17 +406,26 @@ def create_critical_difference_plot(original_data: Dict[str, pd.DataFrame],
     orig_df['orig_rank'] = orig_df['score'].rank(method='dense', ascending=False)
     debiased_df['debiased_rank'] = debiased_df['score'].rank(method='dense', ascending=False)
     
-    # Merge dataframes
-    merged = pd.merge(orig_df[['model', 'score', 'orig_rank']], 
-                      debiased_df[['model', 'score', 'debiased_rank']], 
-                      on='model', suffixes=('_orig', '_debiased'))
+    # Normalize names and merge on key
+    orig_df = orig_df.copy(); debiased_df = debiased_df.copy()
+    orig_df['model_key'] = orig_df['model'].apply(normalize_model_name)
+    debiased_df['model_key'] = debiased_df['model'].apply(normalize_model_name)
+    orig_df = orig_df.drop_duplicates('model_key', keep='first')
+    debiased_df = debiased_df.drop_duplicates('model_key', keep='first')
+    merged = pd.merge(orig_df[['model_key', 'model', 'score', 'orig_rank']], 
+                      debiased_df[['model_key', 'model', 'score', 'debiased_rank']], 
+                      on='model_key', suffixes=('_orig', '_debiased'))
     if len(merged) == 0 and 'original_score' in debiased_df.columns:
         print("  ↪︎ No overlap; rebuilding original from debiased original_score (critical diff)")
         orig_df = debiased_df[['model', 'original_score']].rename(columns={'original_score': 'score'})
         orig_df['orig_rank'] = orig_df['score'].rank(method='dense', ascending=False)
-        merged = pd.merge(orig_df[['model', 'score', 'orig_rank']],
-                          debiased_df[['model', 'score', 'debiased_rank']],
-                          on='model', suffixes=('_orig', '_debiased'))
+        orig_df['model_key'] = orig_df['model'].apply(normalize_model_name)
+        debiased_df['model_key'] = debiased_df['model'].apply(normalize_model_name)
+        orig_df = orig_df.drop_duplicates('model_key', keep='first')
+        debiased_df = debiased_df.drop_duplicates('model_key', keep='first')
+        merged = pd.merge(orig_df[['model_key', 'model', 'score', 'orig_rank']],
+                          debiased_df[['model_key', 'model', 'score', 'debiased_rank']],
+                          on='model_key', suffixes=('_orig', '_debiased'))
         if len(merged) == 0:
             print(f"Warning: No common models found for {metric} even after rebuild")
             return
@@ -303,9 +461,12 @@ def create_critical_difference_plot(original_data: Dict[str, pd.DataFrame],
     ax1.invert_yaxis()  # Lower rank numbers at top
     ax1.grid(True, alpha=0.3)
     
-    # Clean up model labels - only strip \n characters and replace / with _
+    # Clean up model labels - use debiased model names; strip \n and replace '/' with '_'
     model_labels = []
-    for name in merged['model']:
+    name_series = merged['model_debiased'] if 'model_debiased' in merged.columns else (
+        merged['model'] if 'model' in merged.columns else pd.Series([''] * len(merged))
+    )
+    for name in name_series:
         # Only strip \n characters and replace / with _
         clean_name = name.replace('\\n', '').replace('\n', '').replace('/', '_')
         model_labels.append(clean_name)
@@ -364,10 +525,15 @@ def create_summary_comparison(original_data: Dict[str, pd.DataFrame],
         orig_df = original_data[metric]
         debiased_df = debiased_data[metric]
         
-        # Merge on model name
-        merged = pd.merge(orig_df[['model', 'score']], 
-                         debiased_df[['model', 'score']], 
-                         on='model', suffixes=('_orig', '_debiased'))
+        # Normalize names and merge on key
+        orig_df = orig_df.copy(); debiased_df = debiased_df.copy()
+        orig_df['model_key'] = orig_df['model'].apply(normalize_model_name)
+        debiased_df['model_key'] = debiased_df['model'].apply(normalize_model_name)
+        orig_df = orig_df.drop_duplicates('model_key', keep='first')
+        debiased_df = debiased_df.drop_duplicates('model_key', keep='first')
+        merged = pd.merge(orig_df[['model_key', 'score']], 
+                         debiased_df[['model_key', 'score']], 
+                         on='model_key', suffixes=('_orig', '_debiased'))
         
         if len(merged) > 0:
             correlation = np.corrcoef(merged['score_orig'], merged['score_debiased'])[0, 1]
@@ -481,10 +647,23 @@ def visualize_from_jsonl(judge_dir: Union[str, Path], output_dir: Union[str, Pat
                 original_data[factor] = create_ranking_dataframe(agg_df, factor, 'original')
                 factor_base = factor.replace('_score', '')
                 debiased_col = f'score_debiased_{factor_base}' if f'score_debiased_{factor_base}' in agg_df.columns else 'score_debiased'
-                debiased_data[factor] = create_ranking_dataframe(agg_df, debiased_col, 'debiased')
+                deb_df = create_ranking_dataframe(agg_df, debiased_col, 'debiased')
+                # Prefer original factor CI bounds for visualization parity
+                ci_lower_col = f'{factor}_CI_lower'
+                ci_upper_col = f'{factor}_CI_upper'
+                if ci_lower_col in agg_df.columns and ci_upper_col in agg_df.columns:
+                    lower_map = dict(zip(agg_df['model'], agg_df[ci_lower_col]))
+                    upper_map = dict(zip(agg_df['model'], agg_df[ci_upper_col]))
+                    deb_df['rating_q025'] = deb_df['model'].map(lower_map)
+                    deb_df['rating_q975'] = deb_df['model'].map(upper_map)
+                    deb_df['CI'] = deb_df.apply(
+                        lambda r: f"({(r['rating_q025'] - r['score']):.2f}, +{(r['rating_q975'] - r['score']):.2f})",
+                        axis=1
+                    )
                 # Ensure original scores for comparison reflect the factor
-                if 'original_score' not in debiased_data[factor].columns:
-                    debiased_data[factor]['original_score'] = agg_df.loc[debiased_data[factor].index, factor]
+                if 'original_score' not in deb_df.columns:
+                    deb_df['original_score'] = agg_df.loc[deb_df.index, factor]
+                debiased_data[factor] = deb_df
     
     # Process metrics
     if metrics:
@@ -538,6 +717,11 @@ Examples:
                        help='Path to original rankings directory (CSV mode)')
     parser.add_argument('--debiased', type=str, 
                        help='Path to debiased rankings directory (CSV mode)')
+    # New: allow consuming ELO bootstrap CSVs directly
+    parser.add_argument('--elo-debiased-dir', type=str,
+                       help='Path to ELO-bootstrapped debiased CSVs (overrides JSONL)')
+    parser.add_argument('--elo-original-dir', type=str,
+                       help='Path to ELO-bootstrapped original CSVs (optional)')
     
     # New arguments for JSONL mode
     parser.add_argument('--judge-dir', type=str,
@@ -551,6 +735,58 @@ Examples:
     args = parser.parse_args()
     
     # Determine mode and validate arguments
+    if args.elo_debiased_dir or args.elo_original_dir:
+        # ELO CSV mode: load ranking CSVs directly
+        if not args.output_dir:
+            paths = get_project_paths()
+            args.output_dir = paths['figures'] / 'bias_transformation'
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Load CSVs
+        original_dir = Path(args.elo_original_dir) if args.elo_original_dir else None
+        debiased_dir = Path(args.elo_debiased_dir) if args.elo_debiased_dir else None
+        if debiased_dir is None or not debiased_dir.exists():
+            print('Error: --elo-debiased-dir is required and must exist')
+            sys.exit(1)
+        # Use local loader to parse ranking CSVs
+        debiased_data = load_ranking_data(debiased_dir)
+        original_data = load_ranking_data(original_dir) if (original_dir and original_dir.exists()) else {}
+        # Discover debiased metrics from filenames to drive plotting
+        metric_file_map = discover_debiased_metrics(debiased_dir)
+        available = sorted(metric_file_map.keys())
+        if args.metrics:
+            requested = list(args.metrics)
+            metrics_to_process = [m for m in requested if m in metric_file_map]
+        else:
+            metrics_to_process = available
+        print(f"Debiased metrics available: {available}")
+        if args.metrics:
+            print(f"Requested metrics: {list(args.metrics)}")
+        print(f"Processing metrics: {metrics_to_process}")
+        # Ensure debiased_data has frames for each selected metric (lazy load if missing)
+        for metric in metrics_to_process:
+            if metric not in debiased_data:
+                try:
+                    df = pd.read_csv(metric_file_map[metric])
+                    model_col = _pick_first_existing(df, ['model', 'model_id', 'model_name', 'Model', 'name']) or 'model'
+                    if model_col != 'model':
+                        df = df.rename(columns={model_col: 'model'})
+                    # Rename metric-specific score to 'score' if necessary
+                    if metric in df.columns and 'score' not in df.columns:
+                        df = df.rename(columns={metric: 'score'})
+                    debiased_data[metric] = df
+                except Exception as e:
+                    print(f"Warning: Failed to load debiased metric {metric} from {metric_file_map.get(metric)}: {e}")
+        for metric in metrics_to_process:
+            print(f"\nCreating plots for {metric}...")
+            line_plot_path = output_dir / f"line_comparison_{metric}.png"
+            create_line_plot_comparison(original_data, debiased_data, metric, line_plot_path)
+            cd_plot_path = output_dir / f"critical_difference_{metric}.png"
+            create_critical_difference_plot(original_data, debiased_data, metric, cd_plot_path)
+        print(f"\nAll plots saved to: {output_dir}")
+        return 0
+    
     if args.judge_dir:
         # JSONL mode
         if not args.output_dir:
