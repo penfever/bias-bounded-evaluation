@@ -145,9 +145,14 @@ def calculate_abb_noise_parameter(rms_sensitivity: float,
     --------
     float : Standard deviation for Gaussian noise
     
-    Raises:
-    -------
-    ValueError : If A-BB constraint τ > Δ*₂(f,D) * sqrt(2/δ) is not satisfied
+    Notes:
+    ------
+    Following Proposition 1 (splitting the failure budget), for a fixed split δ = δ_B + δ_Δ
+    with δ_B = δ_Δ = δ/2 by default, the mechanism requires τ > Δ*₂(f,D)·sqrt(1/δ_Δ).
+    When this holds, an upper bound on σ that satisfies the guarantee is:
+        σ = (τ − Δ*₂(f,D)·sqrt(1/δ_Δ)) / sqrt( 2(d + 2√(d·log(1/δ_B)) + 2·log(1/δ_B)) ).
+    This bound decreases as τ decreases; if τ is too small (≤ threshold), the guarantee
+    cannot be met by adding noise — increasing σ would only increase the chance of violating τ.
     """
     if rms_sensitivity < 0:
         raise ValueError("rms_sensitivity must be non-negative")
@@ -158,24 +163,26 @@ def calculate_abb_noise_parameter(rms_sensitivity: float,
     if dimensionality <= 0:
         raise ValueError("dimensionality must be positive")
     
-    # Split failure budget: δ_B = δ_Δ = δ/2
-    delta_split = delta / 2
+    # Split failure budget evenly: δ_B = δ_Δ = δ/2
+    delta_split = float(delta) / 2.0
     
-    # Check A-BB constraint: τ > Δ*₂(f,D) * sqrt(2/δ)
-    constraint_threshold = rms_sensitivity * np.sqrt(2.0 / delta)
+    # Threshold: Δ*₂(f,D) · sqrt(1/δ_Δ) = rms_sensitivity * sqrt(2/δ)
+    # (since δ_Δ = δ/2)
+    constraint_threshold = rms_sensitivity * np.sqrt(2.0 / float(delta))
+    
     if tau <= constraint_threshold:
         raise ValueError(
             f"A-BB constraint violated: τ ({tau:.6f}) must be > "
-            f"Δ*₂(f,D) * sqrt(2/δ) ({constraint_threshold:.6f}). "
+            f"Δ*₂(f,D) * sqrt(1/δ_Δ) ({constraint_threshold:.6f}). "
             f"Either increase τ or reduce sensitivity."
         )
     
-    # Calculate numerator: τ - Δ*₂(f,D) * sqrt(2/δ)  
+    # Headroom available for noise
     numerator = tau - constraint_threshold
     
     # Calculate denominator: sqrt(2(d + 2*sqrt(d*log(2/δ)) + 2*log(2/δ)))
     d = float(dimensionality)
-    log_term = np.log(2.0 / delta_split)
+    log_term = np.log(1.0 / delta_split)
     sqrt_term = 2.0 * np.sqrt(d * log_term)
     log_term_scaled = 2.0 * log_term
     
@@ -186,13 +193,9 @@ def calculate_abb_noise_parameter(rms_sensitivity: float,
     sigma = numerator / denominator
     
     if sigma <= 0:
-        raise ValueError(
-            f"Calculated noise parameter σ = {sigma:.6f} is non-positive. "
-            f"This indicates the A-BB constraint is barely satisfied. "
-            f"Consider increasing τ."
-        )
-    
-    return sigma
+        # Should not happen when tau > threshold, but guard anyway
+        return 0.0
+    return float(sigma)
 
 
 def validate_input_array(arr: Union[np.ndarray, List, pd.Series], 

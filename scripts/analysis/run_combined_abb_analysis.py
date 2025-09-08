@@ -331,7 +331,11 @@ def check_sensitivity_profiles(real_judge_name: str, dataset_id: str) -> Dict[st
 def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                               real_judge_name: str,
                               strict_abb: bool = False,
-                              model_question_mapping: Optional[Dict[str, List[Dict]]] = None) -> Dict[str, Any]:
+                              model_question_mapping: Optional[Dict[str, List[Dict]]] = None,
+                              enable_shrinkage: bool = False,
+                              target_tau: Optional[float] = None,
+                              shrink_alpha: Optional[float] = None,
+                              shrink_center: str = "mean") -> Dict[str, Any]:
     """Run Combined A-BB debiasing approaches on the judge data."""
     print(f"\nRunning Combined A-BB analysis for {judge_name}...")
     
@@ -423,7 +427,7 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
     approaches = {
         'combined_abb_conservative': {
             'estimator': estimator_type,
-            'tau': 2.5,
+            'tau': 1.2,
             'delta': 0.15,
             'use_average_case': True,
             'extra_params': {
@@ -433,7 +437,7 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
         },
         'combined_abb_rms': {
             'estimator': estimator_type,
-            'tau': 2.25,
+            'tau': 1.2,
             'delta': 0.1,
             'use_average_case': True,
             'extra_params': {
@@ -442,7 +446,7 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
         },
         'combined_abb_weighted': {
             'estimator': estimator_type,
-            'tau': 2.0,
+            'tau': 1.2,
             'delta': 0.1,
             'use_average_case': True,
             'extra_params': {
@@ -451,7 +455,7 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
         },
         'abb_formatting_only': {
             'estimator': estimator_type,
-            'tau': 0.5,
+            'tau': 1.2,
             'delta': 0.05,
             'use_average_case': True,
             'extra_params': {
@@ -460,7 +464,7 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
         },
         'combined_abb_montecarlo': {
             'estimator': estimator_type,
-            'tau': 2.25,
+            'tau': 1.2,
             'delta': 0.1,
             'use_average_case': True,
             'extra_params': {
@@ -488,13 +492,23 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
         
         try:
             # Base parameters
+            # If a global target_tau is provided, use it for all strategies
+            effective_tau = float(target_tau) if target_tau is not None else float(approach_config.get('tau', 2.0))
             init_params = {
-                'tau': approach_config.get('tau', 2.0),
+                'tau': effective_tau,
                 'delta': approach_config.get('delta', 0.1),
                 'sensitivity_estimator': approach_config['estimator'],
                 'use_average_case': approach_config.get('use_average_case', True),
                 'random_seed': 42
             }
+
+            # Shrinkage controls (from function parameters)
+            if bool(enable_shrinkage):
+                if shrink_alpha is not None:
+                    init_params['shrink_alpha'] = float(shrink_alpha)
+                if target_tau is not None:
+                    init_params['target_tau'] = float(target_tau)
+                init_params['shrink_center'] = str(shrink_center or 'mean')
             
             # Add extra parameters
             init_params.update(approach_config['extra_params'])
@@ -557,16 +571,40 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                     'noise_level': 0.0
                 }
             else:
-                # A-BB precheck using normalized sensitivity (no mechanism yet): Δ̂ = Δ / range
+                # A-BB precheck using normalized sensitivity with optional shrinkage estimate
                 delta_val = float(approach_config.get('delta', init_params.get('delta', 0.1)))
-                tau_val = float(approach_config.get('tau', init_params.get('tau', 2.0)))
+                tau_val = float(effective_tau)
+                # Estimate alpha and S_mu bound
+                s_mu_norm = 0.0
+                if enable_shrinkage and str(shrink_center).lower() in ("mean", "median"):
+                    n_samples = int(len(df))
+                    d_eff = n_samples
+                    s_mu_norm = float(min(1.0, (d_eff ** 0.5) / max(n_samples, 1)))
+                delta_factor = float(np.sqrt(2.0 / delta_val))
+                delta_hat_raw = float(combined_fixed / score_range)
+                A = delta_hat_raw * delta_factor
+                B = float(s_mu_norm) * delta_factor
+                if enable_shrinkage:
+                    if shrink_alpha is not None:
+                        alpha_hat = float(shrink_alpha)
+                    elif target_tau is not None and score_range > 0:
+                        tau_norm = float(target_tau / score_range)
+                        if A > B:
+                            alpha_hat = float(max(0.0, min(1.0, (tau_norm - B) / (A - B))))
+                        else:
+                            alpha_hat = 1.0 if tau_norm > B else 0.0
+                    else:
+                        alpha_hat = 1.0
+                else:
+                    alpha_hat = 1.0
+                eff_sens = alpha_hat * combined_fixed
                 precheck = compute_abb_constraint_validation(
-                    tau=tau_val, delta=delta_val, sensitivity=combined_fixed, score_range=score_range
+                    tau=tau_val, delta=delta_val, sensitivity=eff_sens, score_range=score_range
                 )
                 delta_hat = precheck.get('normalized_sensitivity')
                 threshold = precheck.get('constraint_threshold')
                 margin = precheck.get('margin')
-                print(f"    A-BB precheck: tau={tau_val:.3f}, delta={delta_val:.3f}, Δ̂={delta_hat:.4f}, threshold={threshold:.4f}, margin={margin:.4f} (range={score_range:.3f})")
+                print(f"    A-BB precheck: tau={tau_val:.3f}, delta={delta_val:.3f}, α̂={alpha_hat:.3f}, Sμ̂={s_mu_norm:.4f}, A={A:.4f}, B={B:.4f}, Δ̂eff={delta_hat:.4f}, threshold={threshold:.4f}, margin={margin:.4f} (range={score_range:.3f})")
                 if strict_abb and float(margin) <= 0.0:
                     msg = (
                         f"Strict mode: A-BB precheck failed (tau={tau_val:.6f} <= threshold={threshold:.6f}); skipping strategy"
@@ -595,6 +633,15 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                 else:
                     debiaser.fit(df)
 
+                # After fit, print actual shrinkage alpha and S_mu norm bound from diagnostics if available
+                try:
+                    diag = debiaser.get_diagnostics() or {}
+                    sh = diag.get('shrinkage', {})
+                    if sh:
+                        print(f"    ↪︎ shrinkage: α={sh.get('alpha'):.3f}, Sμ_bound={diag.get('abb_constraint_validation', {}).get('normalized_sensitivity', None) if False else (getattr(debiaser, '_s_mu_norm', 0.0)):.4f}")
+                except Exception:
+                    pass
+
                 # Align debiaser's internal scale to the unified Likert range for consistent bounds/diagnostics
                 try:
                     debiaser._score_min = score_min
@@ -605,6 +652,20 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
 
                 # Transform overall scores using the unified scale
                 debiased_scores = debiaser.transform(original_scores, score_min=score_min, score_max=score_max)
+                
+                # Additionally debias each factor column and collect per-sample fields
+                debiased_factors = {}
+                for factor_col in factor_columns:
+                    try:
+                        factor_vals = df[factor_col].values
+                        debiased_factor_vals = debiaser.transform(factor_vals, score_min=score_min, score_max=score_max)
+                        # Store with requested naming: score_debiased_<factorname without _score>
+                        factor_base = factor_col.replace('_score', '')
+                        key_name = f"score_debiased_{factor_base}"
+                        debiased_factors[key_name] = [float(x) for x in debiased_factor_vals.tolist()]
+                    except Exception as _e:
+                        # Skip on failure; continue with others
+                        continue
                 
                 # Get bias bounds
                 bias_bounds = debiaser.get_bias_bounds(len(original_scores))
@@ -625,7 +686,23 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                 'strategy': approach_name,
                 'original_scores': [float(x) for x in original_scores.tolist()],
                 'debiased_scores': [float(x) for x in debiased_scores.tolist()],
-                'model_question_data': list(zip(df['model'].tolist(), df['question_id'].tolist(), df['game_index'].tolist(), debiased_scores.tolist())),
+                # Package per-sample outputs as dicts including per-factor debiased fields
+                'model_question_data': [
+                    dict(
+                        model=str(m),
+                        question_id=str(q),
+                        game_index=int(g),
+                        score_debiased=float(s),
+                        **{k: float(v[idx]) if isinstance(v, list) else float(v) 
+                           for k, v in debiased_factors.items() if idx < len(v)}
+                    )
+                    for idx, (m, q, g, s) in enumerate(zip(
+                        df['model'].tolist(),
+                        df['question_id'].tolist(),
+                        df['game_index'].tolist(),
+                        debiased_scores.tolist()
+                    ))
+                ],
                 'diagnostics': {
                     'bias_sensitivity': float(diagnostics.get('bias_sensitivity', combined_fixed)) if isinstance(diagnostics, dict) else combined_fixed,
                     'combined_sensitivity': float(diagnostics.get('abb_constraint_validation', {}).get('combined_sensitivity', combined_fixed)) if isinstance(diagnostics, dict) else combined_fixed,
@@ -691,7 +768,6 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
             # Handle combined sensitivity safely
             combined_sens = result_data['diagnostics'].get('combined_sensitivity', 'N/A')
             if isinstance(combined_sens, (int, float)):
-                import numpy as np
                 if np.isnan(combined_sens) or np.isinf(combined_sens):
                     print(f"    ⚠️ Combined sensitivity: {combined_sens} (invalid)")
                 else:
@@ -770,18 +846,38 @@ def save_debiased_scores(base_path: Path, judge_name: str, approach_results: Dic
             debiased_dir = base_path / judge_name / f"base_debiased_{approach_name}"
             debiased_dir.mkdir(parents=True, exist_ok=True)
             
-            # Extract model-question-score data
+            # Extract model-question-score data (support dict-based with per-factor fields)
             model_question_data = approach_data.get('model_question_data', [])
             
             # Group by model
             from collections import defaultdict
             model_scores = defaultdict(list)
-            for model, question_id, game_idx, score in model_question_data:
-                model_scores[model].append({
-                    "question_id": question_id,
-                    "game": game_idx,
-                    "score_debiased": float(score)
-                })
+            for item in model_question_data:
+                if isinstance(item, dict):
+                    out = {
+                        "question_id": item.get("question_id"),
+                        "game": int(item.get("game_index", item.get("game", 0))),
+                        "score_debiased": float(item.get("score_debiased"))
+                    }
+                    # Include any per-factor debiased fields present
+                    for k, v in item.items():
+                        if k.startswith("score_debiased_") and k != "score_debiased":
+                            try:
+                                out[k] = float(v)
+                            except Exception:
+                                continue
+                    model_scores[str(item.get("model"))].append(out)
+                else:
+                    # Backward-compat: handle tuple format (model, question_id, game_idx, score)
+                    try:
+                        model, question_id, game_idx, score = item
+                        model_scores[model].append({
+                            "question_id": question_id,
+                            "game": int(game_idx),
+                            "score_debiased": float(score)
+                        })
+                    except Exception:
+                        continue
             
             # Save each model's scores to a JSONL file
             for model_name, scores in model_scores.items():
@@ -860,7 +956,14 @@ def main(args):
             
             # Run Combined A-BB analysis
             analysis_results = run_combined_abb_analysis(
-                df, judge_name, real_judge_name=judge_to_use, strict_abb=bool(getattr(args, 'strict_abb', False))
+                df,
+                judge_name,
+                real_judge_name=judge_to_use,
+                strict_abb=bool(getattr(args, 'strict_abb', False)),
+                enable_shrinkage=bool(getattr(args, 'enable_shrinkage', False)),
+                target_tau=getattr(args, 'target_tau', None),
+                shrink_alpha=getattr(args, 'shrink_alpha', None),
+                shrink_center=str(getattr(args, 'shrink_center', 'mean')),
             )
             
             # Save debiased scores to individual model JSONL files
@@ -952,6 +1055,14 @@ if __name__ == "__main__":
                         help="Number of samples to use in test mode (default: 5)")
     parser.add_argument("--strict-abb", action="store_true",
                         help="Pre-check A-BB constraint with normalized sensitivity and skip strategy when margin <= 0")
+    parser.add_argument("--enable-shrinkage", action="store_true",
+                        help="Enable shrinkage (contractive) mapping before Gaussian noise")
+    parser.add_argument("--target-tau", type=float, default=None,
+                        help="Target tau (original score units) to calibrate shrinkage alpha if shrink-alpha not provided")
+    parser.add_argument("--shrink-alpha", type=float, default=None,
+                        help="Explicit shrinkage alpha in (0,1]; overrides target-tau calibration if provided")
+    parser.add_argument("--shrink-center", type=str, default="mean",
+                        help="Shrinkage center: mean|median|holdout_mean|profile_mean|ema(0.9)|zero|one")
     
     args = parser.parse_args()
     

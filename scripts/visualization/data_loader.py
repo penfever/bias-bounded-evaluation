@@ -171,8 +171,17 @@ def load_debiased_scores(base_debiased_dir: Union[str, Path]) -> pd.DataFrame:
                             'model': model_name,
                             'question_id': data['question_id'],
                             'game': data['game'],
-                            'score_debiased': float(data['score_debiased'])
                         }
+                        # Always include overall debiased score if present
+                        if 'score_debiased' in data:
+                            score_data['score_debiased'] = float(data['score_debiased'])
+                        # Include any per-factor debiased fields
+                        for k, v in data.items():
+                            if isinstance(k, str) and k.startswith('score_debiased_'):
+                                try:
+                                    score_data[k] = float(v)
+                                except Exception:
+                                    continue
                         all_scores.append(score_data)
                     
                     except (json.JSONDecodeError, KeyError) as e:
@@ -206,10 +215,12 @@ def merge_original_and_debiased(original_df: pd.DataFrame, debiased_df: pd.DataF
     # Merge on model, question_id, and game
     merge_keys = ['model', 'question_id', 'game']
     
-    # Keep all original columns and add debiased score
+    # Determine which debiased score columns are available (overall + per-factor)
+    debiased_cols = [c for c in debiased_df.columns if c == 'score_debiased' or c.startswith('score_debiased_')]
+    # Keep all original columns and add all debiased score columns
     merged_df = pd.merge(
         original_df,
-        debiased_df[merge_keys + ['score_debiased']],
+        debiased_df[merge_keys + debiased_cols],
         on=merge_keys,
         how='left'
     )
@@ -239,10 +250,13 @@ def aggregate_scores_by_model(df: pd.DataFrame,
     DataFrame with model-level aggregated scores and confidence intervals
     """
     if score_cols is None:
-        # Find all numeric columns ending with 'score' or 'score_debiased'
+        # Find all numeric columns for original factors and debiased (overall + per-factor)
         score_cols = [col for col in df.columns 
-                     if (col.endswith('score') or col.endswith('score_debiased')) 
-                     and pd.api.types.is_numeric_dtype(df[col])]
+                     if (
+                         col.endswith('score')  # original factors and overall
+                         or col == 'score_debiased'  # overall debiased
+                         or col.startswith('score_debiased_')  # per-factor debiased
+                     ) and pd.api.types.is_numeric_dtype(df[col])]
     
     # Group by model
     grouped = df.groupby('model')
@@ -318,10 +332,19 @@ def create_ranking_dataframe(model_scores: pd.DataFrame,
     ranking_df['approach'] = approach_name
     
     # Add original score if this is debiased data
-    if 'score_debiased' in score_col and 'overall_score' in model_scores.columns:
-        ranking_df['original_score'] = model_scores['overall_score']
-    elif 'score_debiased' in score_col and 'score' in model_scores.columns:
-        ranking_df['original_score'] = model_scores['score']
+    if score_col.startswith('score_debiased'):
+        # If per-factor debiased, map back to its original factor column
+        if score_col.startswith('score_debiased_'):
+            factor_base = score_col.replace('score_debiased_', '')
+            original_col_candidates = [f'{factor_base}_score', factor_base]
+            for cand in original_col_candidates:
+                if cand in model_scores.columns:
+                    ranking_df['original_score'] = model_scores[cand]
+                    break
+        elif 'overall_score' in model_scores.columns:
+            ranking_df['original_score'] = model_scores['overall_score']
+        elif 'score' in model_scores.columns:
+            ranking_df['original_score'] = model_scores['score']
     
     # Sort by score (descending)
     ranking_df = ranking_df.sort_values('score', ascending=False).reset_index(drop=True)
@@ -391,14 +414,29 @@ def load_judge_data_for_visualization(judge_dir: Union[str, Path],
     
     # Create ranking DataFrames
     original_ranking = create_ranking_dataframe(aggregated_df, 'overall_score', 'original')
-    debiased_ranking = create_ranking_dataframe(aggregated_df, 'score_debiased', 
-                                               approach or 'debiased')
+    debiased_ranking = create_ranking_dataframe(aggregated_df, 'score_debiased', approach or 'debiased')
     
+    # Also build factor-wise debiased rankings if available (prefer per-factor debiased columns)
+    factor_cols = ['correctness_score', 'completeness_score', 'safety_score', 
+                   'conciseness_score', 'style_score']
+    factor_rankings: Dict[str, pd.DataFrame] = {}
+    for fcol in factor_cols:
+        if fcol in aggregated_df.columns:
+            factor_base = fcol.replace('_score', '')
+            debiased_factor_col = f'score_debiased_{factor_base}'
+            # Prefer per-factor debiased if present; otherwise fallback to overall debiased
+            used_debiased_col = debiased_factor_col if debiased_factor_col in aggregated_df.columns else 'score_debiased'
+            factor_rankings[fcol] = create_ranking_dataframe(aggregated_df, used_debiased_col, approach or 'debiased')
+            # Ensure original_score column reflects the factor's original
+            if 'original_score' not in factor_rankings[fcol].columns and fcol in aggregated_df.columns:
+                factor_rankings[fcol]['original_score'] = aggregated_df[fcol]
+
     return {
         'original': original_ranking,
         'debiased': debiased_ranking,
         'merged': merged_df,
-        'aggregated': aggregated_df
+        'aggregated': aggregated_df,
+        'factor_rankings': factor_rankings
     }
 
 

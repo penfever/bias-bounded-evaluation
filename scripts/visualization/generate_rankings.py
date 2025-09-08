@@ -136,13 +136,22 @@ def save_rankings_for_judge_from_jsonl(judge_name: str, output_base_path: Path, 
             }
             
             for score_name, col_name in score_types.items():
-                # Use debiased scores
-                if col_name in agg_df.columns and 'score_debiased' in agg_df.columns:
-                    # Create ranking with debiased scores
-                    ranking_df = create_ranking_dataframe(agg_df, 'score_debiased', clean_approach)
+                # Prepare debiased score column: prefer per-factor debiased when available
+                if col_name in agg_df.columns:
+                    if score_name != 'score':
+                        factor_base = score_name.replace('_score', '')
+                        debiased_col = f'score_debiased_{factor_base}' if f'score_debiased_{factor_base}' in agg_df.columns else 'score_debiased'
+                    else:
+                        debiased_col = 'score_debiased' if 'score_debiased' in agg_df.columns else None
+                else:
+                    debiased_col = None
+
+                if debiased_col is not None and debiased_col in agg_df.columns:
+                    # Create ranking with chosen debiased scores
+                    ranking_df = create_ranking_dataframe(agg_df, debiased_col, clean_approach)
                     
-                    # Add original scores for comparison
-                    if col_name in agg_df.columns:
+                    # Ensure original scores for comparison reflect the factor
+                    if col_name in agg_df.columns and 'original_score' not in ranking_df.columns:
                         ranking_df['original_score'] = agg_df.loc[ranking_df.index, col_name]
                     
                     # Generate filename

@@ -44,6 +44,10 @@ class DifferentialDebias:
                  use_average_case: bool = True,
                  random_seed: Optional[int] = None,
                  dimensionality: Optional[int] = None,
+                 # Shrinkage / contraction options
+                 shrink_alpha: Optional[float] = None,
+                 target_tau: Optional[float] = None,
+                 shrink_center: str = "mean",
                  **estimator_kwargs):
         """
         Initialize differential debiasing mechanism.
@@ -93,6 +97,14 @@ class DifferentialDebias:
         self.use_average_case = use_average_case
         self.random_seed = random_seed
         self.dimensionality = dimensionality
+        # Shrinkage parameters
+        self.shrink_alpha = shrink_alpha
+        self.target_tau = target_tau
+        self.shrink_center = shrink_center
+        self._effective_alpha: Optional[float] = None
+        # Optional shrinkage centers (computed lazily when applicable)
+        self._holdout_mu_norm: Optional[float] = None
+        self._ema_mu_norm: Optional[float] = None
         
         # Set up random number generator
         self.rng = np.random.RandomState(random_seed)
@@ -245,9 +257,24 @@ class DifferentialDebias:
         
         # Estimate bias sensitivity
         self._bias_sensitivity = self.sensitivity_estimator.estimate(self._original_range)
-        
+
         if self._bias_sensitivity <= 0:
             raise ValueError("Bias sensitivity must be positive")
+
+        # Determine effective shrinkage alpha from target_tau if requested
+        if self.target_tau is not None and self.shrink_alpha is None:
+            # Work in normalized units
+            delta_star_norm = float(self._bias_sensitivity / self._original_range)
+            tau_norm = float(self.target_tau / self._original_range)
+            # Using δ split δ_Δ = δ/2 -> sqrt(1/δ_Δ) = sqrt(2/δ)
+            delta_factor = float(np.sqrt(2.0 / float(self.delta)))
+            if delta_star_norm > 0:
+                alpha_max = tau_norm / (delta_star_norm * delta_factor)
+                self._effective_alpha = float(max(0.0, min(1.0, alpha_max)))
+            else:
+                self._effective_alpha = 1.0
+        else:
+            self._effective_alpha = float(self.shrink_alpha) if self.shrink_alpha is not None else 1.0
         
         # Calculate noise parameter (will be applied per-transform)
         self._fitted = True
@@ -300,7 +327,7 @@ class DifferentialDebias:
                 self.dimensionality = len(judgments)
             
             sigma = calculate_abb_noise_parameter(
-                rms_sensitivity=self._bias_sensitivity / (score_max - score_min),  # Normalize sensitivity
+                rms_sensitivity=(self._bias_sensitivity / (score_max - score_min)) * float(self._effective_alpha or 1.0),
                 tau=self.tau,
                 delta=self.delta,
                 dimensionality=self.dimensionality
@@ -322,9 +349,30 @@ class DifferentialDebias:
             
             # Generate and add noise
             noise = self.rng.normal(0, sigma, len(judgments))
-        debiased_normalized = normalized_judgments + noise
-        
-        # Clip to [0, 1] range
+        # Apply shrinkage mapping in normalized space before adding noise (per Proposition)
+        alpha = float(self._effective_alpha or 1.0)
+        base_normalized = normalized_judgments
+        if alpha < 1.0:
+            mode = (self.shrink_center or "mean").lower()
+            if mode == "median":
+                mu = float(np.median(base_normalized))
+            elif mode == "zero":
+                mu = 0.0
+            elif mode == "one":
+                mu = 1.0
+            elif mode == "holdout_mean" and self._holdout_mu_norm is not None:
+                mu = float(self._holdout_mu_norm)
+            elif mode == "profile_mean" and self._holdout_mu_norm is not None:
+                mu = float(self._holdout_mu_norm)
+            elif mode.startswith("ema") and self._ema_mu_norm is not None:
+                mu = float(self._ema_mu_norm)
+            else:
+                mu = float(np.mean(base_normalized))
+            base_normalized = alpha * base_normalized + (1.0 - alpha) * mu
+            base_normalized = clip_to_range(base_normalized, 0.0, 1.0)
+
+        # Add noise and clip
+        debiased_normalized = base_normalized + noise
         debiased_normalized = clip_to_range(debiased_normalized, 0.0, 1.0)
         
         # Denormalize back to original scale
@@ -386,7 +434,7 @@ class DifferentialDebias:
             # A-BB mechanism
             dimensionality = self.dimensionality if self.dimensionality is not None else n_samples
             sigma = calculate_abb_noise_parameter(
-                rms_sensitivity=self._bias_sensitivity / self._original_range,
+                rms_sensitivity=(self._bias_sensitivity / self._original_range) * float(self._effective_alpha or 1.0),
                 tau=self.tau,
                 delta=self.delta,
                 dimensionality=dimensionality
@@ -446,9 +494,18 @@ class DifferentialDebias:
                 diagnostics["abb_constraint_validation"] = compute_abb_constraint_validation(
                     tau=self.tau,
                     delta=self.delta,
-                    sensitivity=float(self._bias_sensitivity),
+                    sensitivity=float(self._bias_sensitivity) * float(self._effective_alpha or 1.0),
                     score_range=float(self._original_range) if self._original_range is not None else None,
                 )
+                diagnostics["shrinkage"] = {
+                    "enabled": bool((self._effective_alpha or 1.0) < 1.0),
+                    "alpha": float(self._effective_alpha or 1.0),
+                    "center": self.shrink_center,
+                    "target_tau": float(self.target_tau) if self.target_tau is not None else None,
+                    "suggested_projection_radius_normalized": (
+                        float(self.target_tau / self._original_range) / 2.0 if self.target_tau is not None and self._original_range else None
+                    ),
+                }
         
         return diagnostics
     

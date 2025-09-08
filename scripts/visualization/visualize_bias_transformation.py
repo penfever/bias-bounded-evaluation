@@ -476,12 +476,14 @@ def visualize_from_jsonl(judge_dir: Union[str, Path], output_dir: Union[str, Pat
         
         for factor in factor_cols:
             if factor in agg_df.columns:
-                # Create factor-specific rankings
+                # Create factor-specific rankings, preferring per-factor debiased scores when present
                 from data_loader import create_ranking_dataframe
                 original_data[factor] = create_ranking_dataframe(agg_df, factor, 'original')
-                if 'score_debiased' in agg_df.columns:
-                    debiased_data[factor] = create_ranking_dataframe(agg_df, 'score_debiased', 'debiased')
-                    # Add original scores for comparison
+                factor_base = factor.replace('_score', '')
+                debiased_col = f'score_debiased_{factor_base}' if f'score_debiased_{factor_base}' in agg_df.columns else 'score_debiased'
+                debiased_data[factor] = create_ranking_dataframe(agg_df, debiased_col, 'debiased')
+                # Ensure original scores for comparison reflect the factor
+                if 'original_score' not in debiased_data[factor].columns:
                     debiased_data[factor]['original_score'] = agg_df.loc[debiased_data[factor].index, factor]
     
     # Process metrics
