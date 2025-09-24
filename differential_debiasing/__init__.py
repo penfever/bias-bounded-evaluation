@@ -38,8 +38,8 @@ from .interfaces import (
 )
 
 __version__ = "0.1.0"
-__author__ = "Benjamin Feuer"
-__email__ = "penfever@gmail.com"
+__author__ = "ANON"
+__email__ = "anon@gmail.com"
 
 __all__ = [
     # Core classes

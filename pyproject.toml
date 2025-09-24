@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "differential-debiasing"
 version = "0.1.0"
 authors = [
-    {name = "Benjamin Feuer", email = "penfever@gmail.com"},
+    {name = "ANONYMOUS", email = "anonymous@gmail.com"},
 ]
 description = "Differential privacy-inspired techniques for reducing implicit bias in LLM judge evaluations"
 readme = "README.md"
@@ -70,9 +70,9 @@ all = [
 differential-debias = "differential_debiasing.cli.main:main"
 
 [project.urls]
-"Homepage" = "https://github.com/penfever/differential-debiasing"
-"Bug Reports" = "https://github.com/penfever/differential-debiasing/issues"
-"Source" = "https://github.com/penfever/differential-debiasing"
+"Homepage" = "https://github.com/anon/differential-debiasing"
+"Bug Reports" = "https://github.com/anon/differential-debiasing/issues"
+"Source" = "https://github.com/anon/differential-debiasing"
 "Documentation" = "https://differential-debiasing.readthedocs.io"
 
 [tool.setuptools.packages.find]

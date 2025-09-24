@@ -30,7 +30,7 @@
     "mean_neighbor_difference": 1.1428571428571428,
     "std_neighbor_difference": 1.2453996981544784,
     "cost_info": {
-      "config_path": "/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/bias-bounded-evaluation/configs/judges/local/qwq-32b-gguf.yaml",
+      "config_path": "/Users/anonymous/Library/CloudStorage/GoogleDrive-anon@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/bias-bounded-evaluation/configs/judges/local/qwq-32b-gguf.yaml",
       "engine": "LLAMACPP",
       "model_name": "unsloth/QwQ-32B-GGUF",
       "spent_usd": 0.0,

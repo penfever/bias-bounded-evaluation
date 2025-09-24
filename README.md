@@ -40,7 +40,7 @@ This library provides tools to:
 
 ```bash
 # From source (recommended for development)
-git clone https://github.com/penfever/differential-debiasing.git
+git clone https://github.com/ANON/differential-debiasing.git
 cd differential-debiasing
 pip install -e .
 

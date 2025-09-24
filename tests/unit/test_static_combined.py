@@ -23,7 +23,7 @@ def test_combined_static_dynamic():
     print("🔍 Testing Combined A-BB with static + dynamic measurements...")
     
     # Load some real data
-    base_path = Path("/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/sos-addl-data/InDepthAnalysis")
+    base_path = Path("/Users/anonymous/Library/CloudStorage/GoogleDrive-anon@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/sos-addl-data/InDepthAnalysis")
     df = load_and_prepare_score_data("QwQ-32B-setting1", base_path)
     
     print(f"Loaded {len(df)} real judge evaluations")

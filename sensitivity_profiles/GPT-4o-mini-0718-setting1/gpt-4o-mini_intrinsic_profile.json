@@ -56,7 +56,7 @@
     "mean_neighbor_difference": 0.875,
     "std_neighbor_difference": 1.0997158723961387,
     "cost_info": {
-      "config_path": "/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/bias-bounded-evaluation/configs/judges/openai/gpt-4o-mini.yaml",
+      "config_path": "/Users/anonymous/Library/CloudStorage/GoogleDrive-anon@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/bias-bounded-evaluation/configs/judges/openai/gpt-4o-mini.yaml",
       "engine": "OPENAI",
       "model_name": "gpt-4o-mini-2024-07-18",
       "spent_usd": 0.2917999999999999,

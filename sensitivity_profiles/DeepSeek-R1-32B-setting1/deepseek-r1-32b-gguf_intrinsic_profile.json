@@ -51,7 +51,7 @@
     "mean_neighbor_difference": 1.0571428571428572,
     "std_neighbor_difference": 1.4130586307289412,
     "cost_info": {
-      "config_path": "/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/bias-bounded-evaluation/configs/judges/local/deepseek-r1-32b-gguf.yaml",
+      "config_path": "/Users/anonymous/Library/CloudStorage/GoogleDrive-anon@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/bias-bounded-evaluation/configs/judges/local/deepseek-r1-32b-gguf.yaml",
       "engine": "LLAMACPP",
       "model_name": "unsloth/DeepSeek-R1-Distill-Qwen-32B-GGUF",
       "spent_usd": 0.0,

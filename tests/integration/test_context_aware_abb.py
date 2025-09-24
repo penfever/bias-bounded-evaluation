@@ -139,7 +139,7 @@ def test_context_aware_dynamic_abb():
             return
     
     # Base path for score data
-    base_path = Path("/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/sos-addl-data/InDepthAnalysis")
+    base_path = Path("/Users/anonymous/Library/CloudStorage/GoogleDrive-anon@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/sos-addl-data/InDepthAnalysis")
     
     # Load Arena-Hard context data
     try:

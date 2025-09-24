@@ -401,7 +401,7 @@ def main():
     parser.add_argument("--judge", "-j", type=str, required=True,
                         help="Judge name to measure (e.g., 'gpt-4o-mini', 'claude-3-5-sonnet')")
     parser.add_argument("--data-path", "-d", type=str, 
-                        default="/Users/benjaminfeuer/Library/CloudStorage/GoogleDrive-penfever@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/sos-addl-data/InDepthAnalysis",
+                        default="/Users/anonymous/Library/CloudStorage/GoogleDrive-anon@gmail.com/My Drive/Current Papers/bias-bounded-evaluation/sos-addl-data/InDepthAnalysis",
                         help="Base path to evaluation data")
     parser.add_argument("--output-dir", "-o", type=str,
                         default="sensitivity_profiles",
