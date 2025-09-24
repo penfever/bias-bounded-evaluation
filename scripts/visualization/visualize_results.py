@@ -426,6 +426,10 @@ def create_summary_table(results: dict) -> pd.DataFrame:
         if 'approaches' in judge_results:
             for approach_name, approach_result in judge_results['approaches'].items():
                 if approach_result.get('success', False):
+                    # Extract tau/delta if available in diagnostics; fall back to None
+                    diag = approach_result.get('diagnostics', {}) or {}
+                    tau_val = diag.get('tau')
+                    delta_val = diag.get('delta')
                     summary_data.append({
                         'Judge': judge_name,
                         'Strategy': approach_name.replace('combined_abb_', ''),
@@ -433,6 +437,8 @@ def create_summary_table(results: dict) -> pd.DataFrame:
                         'Correlation': f"{approach_result['validation']['correlation']:.3f}",
                         'Constraint Satisfied': '✅' if approach_result['diagnostics'].get('abb_constraint_satisfied') else '❌',
                         'Noise Std': f"{approach_result['diagnostics']['noise_std']:.4f}",
+                        'Tau': (f"{float(tau_val):.3f}" if isinstance(tau_val, (int, float)) else ''),
+                        'Delta': (f"{float(delta_val):.3f}" if isinstance(delta_val, (int, float)) else ''),
                         'Samples': approach_result['n_samples']
                     })
     
