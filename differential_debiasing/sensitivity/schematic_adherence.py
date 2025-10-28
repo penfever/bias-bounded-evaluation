@@ -11,9 +11,11 @@ as formalized in the bias-bounded LLM judges paper, including:
 
 import numpy as np
 import pandas as pd
-from typing import Union, Dict, Any, Optional, List, Tuple
+from typing import Union, Dict, Any, Optional, List, Tuple, Sequence
 from .base import SensitivityEstimator
 import warnings
+
+from differential_debiasing.core.utils import context_adjusted_rms
 
 
 class SchematicAdherenceSensitivity(SensitivityEstimator):
@@ -546,3 +548,36 @@ class SchematicAdherenceSensitivity(SensitivityEstimator):
     def get_cluster_weights(self) -> Optional[Dict[str, Any]]:
         """Get cluster-specific weights if clustering was performed."""
         return self._cluster_weights
+
+
+def estimate_schematic_context_sensitivity(
+    df: pd.DataFrame,
+    *,
+    factor_columns: Optional[Sequence[str]] = None,
+    target_column: str = "overall_score",
+    score_range: float = 4.0,
+    intrinsic_sensitivity: Optional[float] = None,
+    estimator_kwargs: Optional[Dict[str, Any]] = None,
+) -> Tuple[float, float]:
+    """
+    Fit the schematic adherence estimator and return both raw and context-adjusted
+    RMS sensitivities.
+
+    Returns
+    -------
+    tuple(float, float):
+        ``(raw_value, context_adjusted_value)``, where the second element will
+        match the first when ``intrinsic_sensitivity`` is not provided.
+    """
+    estimator_kwargs = estimator_kwargs or {}
+    estimator = SchematicAdherenceSensitivity(
+        factor_columns=list(factor_columns) if factor_columns is not None else None,
+        target_column=target_column,
+        **estimator_kwargs,
+    )
+    estimator.fit(df)
+    raw_value = float(estimator.estimate(score_range))
+    if intrinsic_sensitivity is None:
+        return raw_value, raw_value
+    adjusted = context_adjusted_rms(raw_value, float(intrinsic_sensitivity))
+    return raw_value, adjusted

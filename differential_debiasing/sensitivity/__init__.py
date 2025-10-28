@@ -7,7 +7,10 @@ from .factor_analysis import FactorAnalysisSensitivity
 from .empirical import EmpiricalSensitivity
 from .domain_specific import DomainSpecificSensitivity
 from .psychometric_reliability import PsychometricReliabilitySensitivity
-from .schematic_adherence import SchematicAdherenceSensitivity
+from .schematic_adherence import (
+    SchematicAdherenceSensitivity,
+    estimate_schematic_context_sensitivity,
+)
 from .combined import CombinedSensitivity
 from .abb_sensitivity import ABBSensitivity
 from .combined_abb_sensitivity import CombinedABBSensitivity
@@ -22,6 +25,7 @@ __all__ = [
     "DomainSpecificSensitivity",
     "PsychometricReliabilitySensitivity",
     "SchematicAdherenceSensitivity", 
+    "estimate_schematic_context_sensitivity",
     "CombinedSensitivity",
     "ABBSensitivity",
     "CombinedABBSensitivity",

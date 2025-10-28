@@ -7,8 +7,15 @@ import pandas as pd
 import warnings
 from typing import Union, Optional, Dict, Any, List
 from .utils import (
-    normalize_judgments, denormalize_judgments, calculate_noise_parameter, calculate_abb_noise_parameter,
-    validate_input_array, clip_to_range, check_bias_parameters, compute_abb_constraint_validation
+    normalize_judgments,
+    denormalize_judgments,
+    calculate_noise_parameter,
+    calculate_abb_noise_parameter,
+    validate_input_array,
+    clip_to_range,
+    check_bias_parameters,
+    calculate_effective_alpha,
+    build_abb_precheck,
 )
 from .sensitivity_profiles import SensitivityProfile, SensitivityProfileManager, get_formatting_sensitivity
 from ..sensitivity.base import SensitivityEstimator
@@ -262,19 +269,14 @@ class DifferentialDebias:
             raise ValueError("Bias sensitivity must be positive")
 
         # Determine effective shrinkage alpha from target_tau if requested
-        if self.target_tau is not None and self.shrink_alpha is None:
-            # Work in normalized units
-            delta_star_norm = float(self._bias_sensitivity / self._original_range)
-            tau_norm = float(self.target_tau / self._original_range)
-            # Using δ split δ_Δ = δ/2 -> sqrt(1/δ_Δ) = sqrt(2/δ)
-            delta_factor = float(np.sqrt(2.0 / float(self.delta)))
-            if delta_star_norm > 0:
-                alpha_max = tau_norm / (delta_star_norm * delta_factor)
-                self._effective_alpha = float(max(0.0, min(1.0, alpha_max)))
-            else:
-                self._effective_alpha = 1.0
-        else:
-            self._effective_alpha = float(self.shrink_alpha) if self.shrink_alpha is not None else 1.0
+        self._effective_alpha = calculate_effective_alpha(
+            bias_sensitivity=float(self._bias_sensitivity),
+            score_range=float(self._original_range),
+            tau=float(self.tau),
+            delta=float(self.delta),
+            shrink_alpha=self.shrink_alpha,
+            target_tau=self.target_tau,
+        )
         
         # Calculate noise parameter (will be applied per-transform)
         self._fitted = True
@@ -491,12 +493,14 @@ class DifferentialDebias:
             
             # Add A-BB specific diagnostics (normalized check to match mechanism math)
             if isinstance(self.sensitivity_estimator, (ABBSensitivity, CombinedABBSensitivity, FixedSensitivityEstimator)):
-                diagnostics["abb_constraint_validation"] = compute_abb_constraint_validation(
+                precheck = build_abb_precheck(
                     tau=self.tau,
                     delta=self.delta,
-                    sensitivity=float(self._bias_sensitivity) * float(self._effective_alpha or 1.0),
+                    sensitivity=float(self._bias_sensitivity),
                     score_range=float(self._original_range) if self._original_range is not None else None,
+                    alpha=float(self._effective_alpha or 1.0),
                 )
+                diagnostics["abb_constraint_validation"] = precheck
                 diagnostics["shrinkage"] = {
                     "enabled": bool((self._effective_alpha or 1.0) < 1.0),
                     "alpha": float(self._effective_alpha or 1.0),

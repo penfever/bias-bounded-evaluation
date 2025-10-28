@@ -10,182 +10,162 @@ system-level bias measurement capabilities.
 import sys
 import os
 import json
+import copy
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from typing import Dict, Any, List, Optional
-import warnings
+from typing import Dict, Any, Optional, List
 import argparse
 
 # Add current directory to Python path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from differential_debiasing.core.debias import DifferentialDebias
-from differential_debiasing.core.config import ConfigManager
 from differential_debiasing.core.sensitivity_profiles import collect_profile_info
 from differential_debiasing.core.utils import (
-    context_adjusted_rms,
-    compute_abb_constraint_validation,
     round_nested,
+    calculate_effective_alpha,
+    estimate_s_mu_norm,
+    build_abb_precheck,
 )
 from differential_debiasing.interfaces import (
-    get_judge_config_path,
     find_judge_data_directories,
     load_and_prepare_score_data,
+    get_dataset_judge_mapping,
+    determine_score_scale,
 )
-from differential_debiasing.sensitivity.psychometric_reliability import PsychometricReliabilitySensitivity
-from differential_debiasing.sensitivity.schematic_adherence import SchematicAdherenceSensitivity
+from differential_debiasing.sensitivity import estimate_schematic_context_sensitivity
 # Note: Oumi judge interface is imported lazily only when needed
 
-def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
-                              real_judge_name: str,
-                              strict_abb: bool = False,
-                              model_question_mapping: Optional[Dict[str, List[Dict]]] = None,
-                              enable_shrinkage: bool = False,
-                              target_tau: Optional[float] = None,
-                              shrink_alpha: Optional[float] = None,
-                              shrink_center: str = "mean") -> Dict[str, Any]:
+
+APPROACH_CONFIG_PATH = Path(__file__).with_name("combined_abb_approaches.json")
+try:
+    with open(APPROACH_CONFIG_PATH, "r", encoding="utf-8") as _fh:
+        DEFAULT_APPROACH_CONFIGS = json.load(_fh)
+except FileNotFoundError as exc:
+    raise RuntimeError(
+        f"Approach configuration file missing: {APPROACH_CONFIG_PATH}. "
+        "Please restore the configuration before running the analysis."
+    ) from exc
+
+
+def _combine_sensitivity(
+    approach_name: str,
+    component_values: Dict[str, float],
+    extra_params: Dict[str, Any],
+) -> float:
+    """Derive the combined sensitivity value for a given approach."""
+    if not component_values:
+        return 0.0
+
+    values = {k: float(v) for k, v in component_values.items()}
+    arr = np.array(list(values.values()), dtype=float)
+
+    if approach_name == "abb_formatting_only":
+        return float(values.get("formatting", arr[0]))
+
+    if approach_name == "combined_abb_conservative":
+        return float(arr.max())
+
+    if approach_name == "combined_abb_rms":
+        return float(np.sqrt(np.mean(np.square(arr))))
+
+    weights = extra_params.get("component_weights") if isinstance(extra_params, dict) else None
+    if weights:
+        weight_values: List[float] = []
+        component_array: List[float] = []
+        for name, val in values.items():
+            weight = float(weights.get(name, 0.0))
+            if weight > 0.0:
+                weight_values.append(weight)
+                component_array.append(val)
+        if weight_values:
+            weight_arr = np.array(weight_values, dtype=float)
+            comp_arr = np.array(component_array, dtype=float)
+            total = weight_arr.sum()
+            if total > 0.0:
+                normalized = weight_arr / total
+                return float(np.dot(normalized, comp_arr))
+
+    return float(arr.mean())
+
+
+def _summarize_results(overall_results: Dict[str, Any]) -> Dict[str, Any]:
+    """Condense full analysis outputs for the JSON summary."""
+    summary: Dict[str, Any] = {}
+    for judge_name, judge_data in overall_results.items():
+        entry: Dict[str, Any] = {}
+        if isinstance(judge_data, dict):
+            if 'data_source' in judge_data:
+                entry['data_source'] = judge_data['data_source']
+            if 'n_samples' in judge_data:
+                entry['n_samples'] = judge_data['n_samples']
+            if 'error' in judge_data:
+                entry['error'] = judge_data['error']
+
+            approaches = judge_data.get('approaches')
+            if isinstance(approaches, dict):
+                summary_approaches: Dict[str, Any] = {}
+                for name, data in approaches.items():
+                    if isinstance(data, dict):
+                        summary_approaches[name] = {
+                            k: v
+                            for k, v in data.items()
+                            if k not in ['original_scores', 'debiased_scores', 'model_question_data']
+                        }
+                    else:
+                        summary_approaches[name] = data
+                entry['approaches'] = summary_approaches
+
+        summary[judge_name] = entry
+    return summary
+
+def run_combined_abb_analysis(
+    df: pd.DataFrame,
+    judge_name: str,
+    real_judge_name: str,
+    strict_abb: bool = False,
+    enable_shrinkage: bool = False,
+    target_tau: Optional[float] = None,
+    shrink_alpha: Optional[float] = None,
+    shrink_center: str = "mean",
+) -> Dict[str, Any]:
     """Run Combined A-BB debiasing approaches on the judge data."""
     print(f"\nRunning Combined A-BB analysis for {judge_name}...")
-    
-    config_manager = ConfigManager()
-    
     # Check for sensitivity profiles for the real judge, and dataset-scoped intrinsic jitter
     profile_info = collect_profile_info(real_judge_name, judge_name, verbose=True)
     
-    # Judge function not needed in this script (no dynamic generators)
-    judge_function = None
-    
-    # Determine dynamic generators based on profile availability
-    profile_override = None
     ctx = profile_info.get('context_adjusted_rms') if profile_info else None
     if ctx is None:
         # If formatting is missing entirely, we cannot proceed safely
         raise RuntimeError(
             f"Formatting sensitivity profile missing for judge '{real_judge_name}'. Please generate it first."
         )
-    # No dynamic generators in this script (formatting covered by profile; omit hamming as trivial here)
-    dynamic_generators = []
-    # Build a composed profile override including only formatting (context-adjusted RMS)
-    profile_override = {'value': float(ctx)}
     print(f"🚀 Using Context-Adjusted RMS for formatting: {ctx:.4f}")
 
     # Establish a single, consistent score range from input data and reuse it
-    # Compute across all *_score columns to capture the maximum observed range
-    score_cols_all = [col for col in df.columns if col.endswith('_score')]
-    if score_cols_all:
-        global_min = float(pd.concat([df[c] for c in score_cols_all], axis=0).min())
-        global_max = float(pd.concat([df[c] for c in score_cols_all], axis=0).max())
-        score_min = global_min
-        score_max = global_max
-        score_range = float(score_max - score_min)
-        if score_range <= 0:
-            # Fallback to 1-5 Likert range if degenerate
-            score_min, score_max, score_range = 1.0, 5.0, 4.0
-    else:
-        # Fallback if schema unexpected
-        score_min, score_max, score_range = 1.0, 5.0, 4.0
+    score_min, score_max, score_range = determine_score_scale(df)
     print(f"   ↪︎ Using unified score scale: min={score_min:.3f}, max={score_max:.3f}, range={score_range:.3f}")
 
-    # Compute context-aware static sensitivities (psychometric and schematic)
+    # Compute context-aware schematic sensitivity (psychometric path deprecated)
     factor_columns = [col for col in df.columns if col.endswith('_score') and col != 'overall_score']
 
-    # Psychometric
-    try:
-        psych_est = PsychometricReliabilitySensitivity(factor_columns=factor_columns, robust=True)
-        psych_est.fit(df)
-        psych_raw = float(psych_est.estimate(score_range))
-    except Exception as e:
-        print(f"Warning: Psychometric reliability estimation failed: {e}")
-        psych_raw = 0.0
-    psych_ctx = context_adjusted_rms(psych_raw, float(profile_info['intrinsic_sensitivity'])) if profile_info.get('intrinsic_sensitivity') is not None else psych_raw
-
     # Schematic
+    schematic_raw = 0.0
+    schem_ctx = 0.0
     try:
-        schem_est = SchematicAdherenceSensitivity(factor_columns=factor_columns, target_column='overall_score')
-        schem_est.fit(df)
-        schem_raw = float(schem_est.estimate(score_range))
+        schematic_raw, schem_ctx = estimate_schematic_context_sensitivity(
+            df,
+            factor_columns=factor_columns or None,
+            score_range=score_range,
+            intrinsic_sensitivity=profile_info.get('intrinsic_sensitivity'),
+        )
     except Exception as e:
         print(f"Warning: Schematic adherence estimation failed: {e}")
-        schem_raw = 0.0
-    schem_ctx = context_adjusted_rms(schem_raw, float(profile_info['intrinsic_sensitivity'])) if profile_info.get('intrinsic_sensitivity') is not None else schem_raw
 
-    print(f"   ↪︎ context-aware static: psych={psych_ctx:.4f}, schematic={schem_ctx:.4f}")
+    print(f"   ↪︎ context-aware static: schematic={schem_ctx:.4f}")
 
-    # Create real judge function using Oumi only if dynamic generators are needed
-    if len(dynamic_generators) > 0:
-        from differential_debiasing.interfaces.oumi_interface import create_oumi_judge_function
-        print(f"Attempting to use real judge: {real_judge_name}")
-        judge_config_path = get_judge_config_path(real_judge_name)
-        if not judge_config_path.exists():
-            raise FileNotFoundError(f"Judge config not found at {judge_config_path}")
-        judge_function = create_oumi_judge_function(
-            str(judge_config_path),
-            cost_budget_usd=5.0,  # Conservative budget for testing
-            cache_responses=True
-        )
-        print(f"✅ Successfully created {real_judge_name} judge function")
-
-    # Define Combined A-BB approaches with different aggregation strategies
-    # Set smaller tau values (1.0–1.5 range) per request
-    # Choose estimator type based on profile availability
-    # Use profile-enhanced estimator when we have any profile override or judge-level profile
-    # We will pass a fixed combined sensitivity for each strategy
-    estimator_type = 'fixed'
-    
-    approaches = {
-        'combined_abb_conservative': {
-            'estimator': estimator_type,
-            'tau': 1.2,
-            'delta': 0.15,
-            'use_average_case': True,
-            'extra_params': {
-                # Fixed estimator parameters (set later per-strategy before init)
-                'fixed_sensitivity_value': None,
-            }
-        },
-        'combined_abb_rms': {
-            'estimator': estimator_type,
-            'tau': 1.2,
-            'delta': 0.1,
-            'use_average_case': True,
-            'extra_params': {
-                'fixed_sensitivity_value': None,
-            }
-        },
-        'combined_abb_weighted': {
-            'estimator': estimator_type,
-            'tau': 1.2,
-            'delta': 0.1,
-            'use_average_case': True,
-            'extra_params': {
-                'fixed_sensitivity_value': None,
-            }
-        },
-        'abb_formatting_only': {
-            'estimator': estimator_type,
-            'tau': 1.2,
-            'delta': 0.05,
-            'use_average_case': True,
-            'extra_params': {
-                'fixed_sensitivity_value': None,
-            }
-        },
-        'combined_abb_montecarlo': {
-            'estimator': estimator_type,
-            'tau': 1.2,
-            'delta': 0.1,
-            'use_average_case': True,
-            'extra_params': {
-                'fixed_sensitivity_value': None,
-                'mc_weights': {
-                    'formatting': 1.0/3.0,
-                    'psychometric': 1.0/3.0,
-                    'schematic': 1.0/3.0,
-                }
-            }
-        }
-    }
+    approaches = copy.deepcopy(DEFAULT_APPROACH_CONFIGS)
     
     results = {}
     
@@ -220,42 +200,16 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                 init_params['shrink_center'] = str(shrink_center or 'mean')
             
             # Add extra parameters
-            init_params.update(approach_config['extra_params'])
+            extra_params = approach_config.setdefault('extra_params', {})
+            extra_params.setdefault('fixed_sensitivity_value', None)
+            init_params.update(extra_params)
 
             # Compute combined fixed sensitivity for this approach
-            # Add a slight perturbation to avoid exact zeros leading to no-op (TODO: revisit handling of zero ctx)
-            _eps = 1e-3
-            _fmt = ctx if ctx > 0 else _eps
-            _psy = psych_ctx if psych_ctx > 0 else _eps
-            _sch = schem_ctx if schem_ctx > 0 else _eps
-
-            if approach_name == 'combined_abb_conservative':
-                combined_fixed = float(max(_fmt, _psy, _sch))
-            elif approach_name == 'combined_abb_rms':
-                import numpy as _np
-                combined_fixed = float(_np.sqrt(_np.mean(_np.square([_fmt, _psy, _sch]))))
-            elif approach_name == 'combined_abb_montecarlo':
-                import numpy as _np
-                w = approach_config['extra_params'].get('mc_weights', {}) or {}
-                w_fmt = float(w.get('formatting', 1.0/3.0))
-                w_psy = float(w.get('psychometric', 1.0/3.0))
-                w_sch = float(w.get('schematic', 1.0/3.0))
-                total_w = w_fmt + w_psy + w_sch
-                if total_w <= 0:
-                    w_fmt = w_psy = w_sch = 1.0/3.0
-                    total_w = 1.0
-                w_fmt /= total_w
-                w_psy /= total_w
-                w_sch /= total_w
-                v_fmt = _fmt * _fmt
-                v_psy = _psy * _psy
-                v_sch = _sch * _sch
-                combined_fixed = float(_np.sqrt(w_fmt * v_fmt + w_psy * v_psy + w_sch * v_sch))
-                print(f"    MC weights: formatting={w_fmt:.3f}, psychometric={w_psy:.3f}, schematic={w_sch:.3f}")
-            elif approach_name == 'abb_formatting_only':
-                combined_fixed = float(_fmt)
-            else:  # weighted: default equal weights
-                combined_fixed = float((_fmt + _psy + _sch) / 3.0)
+            component_values = {
+                'formatting': ctx if ctx > 0 else 1e-3,
+                'schematic': schem_ctx if schem_ctx > 0 else 1e-3,
+            }
+            combined_fixed = _combine_sensitivity(approach_name, component_values, extra_params)
 
             # No-op: if combined sensitivity is non-positive, skip mechanism and return original
             original_scores = df['overall_score'].values
@@ -280,50 +234,53 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                     'noise_level': 0.0
                 }
             else:
-                # A-BB precheck using normalized sensitivity with optional shrinkage estimate
+                # A-BB precheck using shared normalization helpers
                 delta_val = float(approach_config.get('delta', init_params.get('delta', 0.1)))
                 tau_val = float(effective_tau)
-                # Estimate alpha and S_mu bound
-                s_mu_norm = 0.0
-                if enable_shrinkage and str(shrink_center).lower() in ("mean", "median"):
-                    n_samples = int(len(df))
-                    d_eff = n_samples
-                    s_mu_norm = float(min(1.0, (d_eff ** 0.5) / max(n_samples, 1)))
-                delta_factor = float(np.sqrt(2.0 / delta_val))
-                delta_hat_raw = float(combined_fixed / score_range) if score_range > 0 else float(combined_fixed)
-                tau_norm = float(tau_val / score_range) if score_range > 0 else float(tau_val)
-                A = delta_hat_raw * delta_factor
-                B = float(s_mu_norm) * delta_factor
-                if enable_shrinkage:
-                    if shrink_alpha is not None:
-                        alpha_hat = float(shrink_alpha)
-                    elif target_tau is not None and score_range > 0:
-                        target_tau_norm = float(target_tau / score_range)
-                        if A > B:
-                            alpha_hat = float(max(0.0, min(1.0, (target_tau_norm - B) / (A - B))))
-                        else:
-                            alpha_hat = 1.0 if target_tau_norm > B else 0.0
-                    else:
-                        alpha_hat = 1.0
-                else:
-                    alpha_hat = 1.0
-                eff_sens = alpha_hat * combined_fixed
-                precheck = compute_abb_constraint_validation(
-                    tau=tau_val, delta=delta_val, sensitivity=eff_sens, score_range=score_range
+                shrink_enabled = bool(enable_shrinkage)
+                s_mu_norm = estimate_s_mu_norm(
+                    len(df),
+                    shrink_center=str(shrink_center),
+                ) if shrink_enabled else 0.0
+                alpha_hat = 1.0
+                if shrink_enabled:
+                    alpha_hat = calculate_effective_alpha(
+                        bias_sensitivity=combined_fixed,
+                        score_range=score_range,
+                        tau=tau_val,
+                        delta=delta_val,
+                        shrink_alpha=float(shrink_alpha) if shrink_alpha is not None else None,
+                        target_tau=float(target_tau) if target_tau is not None else None,
+                    )
+                precheck = build_abb_precheck(
+                    tau=tau_val,
+                    delta=delta_val,
+                    sensitivity=combined_fixed,
+                    score_range=score_range,
+                    alpha=alpha_hat,
+                    s_mu_norm=s_mu_norm,
                 )
-                delta_hat = precheck.get('normalized_sensitivity')
-                tau_norm_report = precheck.get('normalized_tau', tau_norm)
-                threshold = precheck.get('constraint_threshold')
-                margin = precheck.get('margin')
+                normalized_tau = precheck.get('normalized_tau')
+                normalized_sensitivity = precheck.get('normalized_sensitivity')
+                tau_display = (
+                    f"{float(normalized_tau):.4f}" if normalized_tau is not None else f"{precheck['tau']:.3f}"
+                )
+                sens_display = (
+                    f"{float(normalized_sensitivity):.4f}"
+                    if normalized_sensitivity is not None
+                    else f"{precheck['effective_sensitivity']:.4f}"
+                )
                 print(
-                    f"    A-BB precheck (normalized): tau={tau_norm_report:.4f} (raw {tau_val:.3f}), "
-                    f"delta={delta_val:.3f}, α̂={alpha_hat:.3f}, Sμ̂={s_mu_norm:.4f}, "
-                    f"A={A:.4f}, B={B:.4f}, Δ̂eff={delta_hat:.4f}, "
-                    f"threshold={threshold:.4f}, margin={margin:.4f} (range={score_range:.3f})"
+                    f"    A-BB precheck (normalized): tau={tau_display} (raw {precheck['tau']:.3f}), "
+                    f"delta={delta_val:.3f}, α̂={alpha_hat:.3f}, Sμ̂={precheck['s_mu_norm']:.4f}, "
+                    f"A={precheck['A_component']:.4f}, B={precheck['B_component']:.4f}, Δ̂eff={sens_display}, "
+                    f"threshold={precheck['constraint_threshold']:.4f}, margin={precheck['margin']:.4f} "
+                    f"(range={score_range:.3f})"
                 )
-                if strict_abb and float(margin) <= 0.0:
+                if strict_abb and float(precheck.get('margin', 0.0)) <= 0.0:
                     msg = (
-                        f"Strict mode: A-BB precheck failed (tau={tau_val:.6f} <= threshold={threshold:.6f}); skipping strategy"
+                        f"Strict mode: A-BB precheck failed (tau={precheck['tau']:.6f} <= "
+                        f"threshold={precheck['constraint_threshold']:.6f}); skipping strategy"
                     )
                     print(f"    ❌ {msg}")
                     results[approach_name] = {
@@ -427,8 +384,8 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                     'context_adjust_intrinsic_rms': float(profile_info['intrinsic_sensitivity']) if profile_info.get('intrinsic_sensitivity') is not None else None,
                     'formatting_profile_rms': float(profile_info['formatting_sensitivity']) if profile_info.get('formatting_sensitivity') is not None else None,
                     # Save context-aware static sensitivities used in combination
-                    'psychometric_context_rms': float(psych_ctx),
                     'schematic_context_rms': float(schem_ctx),
+                    'schematic_raw_rms': float(schematic_raw),
                     # hamming_profile_rms omitted in this script
                     'intrinsic_profile_rms': float(profile_info['intrinsic_sensitivity']) if profile_info.get('intrinsic_sensitivity') is not None else None,
                     'tau': float(bias_bounds['tau']),
@@ -462,21 +419,6 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                     'dynamic_measurements': measurement_breakdown.get('dynamic_measurements', {}),
                     'combination_strategy': measurement_breakdown.get('combination_strategy')
                 }
-            if approach_name == 'combined_abb_montecarlo':
-                w = approach_config['extra_params'].get('mc_weights', {}) or {}
-                result_data.setdefault('measurement_breakdown', {})
-                result_data['measurement_breakdown'].update({
-                    'monte_carlo_weights': {
-                        'formatting': float(w.get('formatting', 1.0/3.0)),
-                        'psychometric': float(w.get('psychometric', 1.0/3.0)),
-                        'schematic': float(w.get('schematic', 1.0/3.0)),
-                    }
-                })
-            
-            # Add judge cost information if using real judge
-            if hasattr(judge_function, 'interface'):
-                cost_summary = judge_function.interface.get_cost_summary()
-                result_data['judge_costs'] = cost_summary
             
             results[approach_name] = result_data
             
@@ -623,16 +565,8 @@ def main(args):
     """Main execution function."""
     print("🚀 Running Combined A-BB Debiasing Analysis")
     print("=" * 60)
-    
-    # Map judge datasets to appropriate judge models
-    JUDGE_MAPPING = {
-        "QwQ-32B-setting1": "qwq-32b-gguf",
-        "DeepSeek-R1-32B-setting1": "deepseek-r1-32b-gguf", 
-        "DeepSeek-R1-32B-setting2": "deepseek-r1-32b-gguf",
-        "DeepSeek-R1-32B-setting3": "deepseek-r1-32b-gguf",
-        "GPT-3.5-Turbo-0125-setting1": "gpt-3.5-turbo",
-        "GPT-4o-mini-0718-setting1": "gpt-4o-mini",
-    }
+
+    dataset_judge_map = get_dataset_judge_mapping()
     
     # Base path for score data (from CLI)
     base_path = Path(args.data_path)
@@ -664,10 +598,13 @@ def main(args):
             df = load_and_prepare_score_data(judge_name, base_path)
             
             # Determine which judge to use for this dataset
-            if judge_name not in JUDGE_MAPPING:
-                raise ValueError(f"No judge mapping found for dataset '{judge_name}'. Available mappings: {list(JUDGE_MAPPING.keys())}")
-            
-            judge_to_use = JUDGE_MAPPING[judge_name]
+            if judge_name not in dataset_judge_map:
+                raise ValueError(
+                    f"No judge mapping found for dataset '{judge_name}'. "
+                    f"Available mappings: {list(dataset_judge_map.keys())}"
+                )
+
+            judge_to_use = dataset_judge_map[judge_name]
             print(f"  🔧 Using judge: {judge_to_use} for dataset: {judge_name}")
             
             # Run Combined A-BB analysis
@@ -706,28 +643,7 @@ def main(args):
     output_file = base_path / "combined_abb_analysis_results.json"
     
     # Create summary without individual scores
-    summary_results = {}
-    for judge_name, judge_data in overall_results.items():
-        summary_results[judge_name] = {
-            'data_source': judge_data.get('data_source'),
-            'n_samples': judge_data.get('n_samples')
-        }
-        
-        if 'error' in judge_data:
-            summary_results[judge_name]['error'] = judge_data['error']
-        
-        if 'approaches' in judge_data:
-            summary_approaches = {}
-            for approach_name, approach_data in judge_data['approaches'].items():
-                if isinstance(approach_data, dict):
-                    # Remove large data arrays
-                    summary_approach = {k: v for k, v in approach_data.items() 
-                                     if k not in ['original_scores', 'debiased_scores', 'model_question_data']}
-                    summary_approaches[approach_name] = summary_approach
-                else:
-                    summary_approaches[approach_name] = approach_data
-            summary_results[judge_name]['approaches'] = summary_approaches
-    
+    summary_results = _summarize_results(overall_results)
     rounded_results = round_nested(summary_results, sig=3)
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(rounded_results, f, indent=2, ensure_ascii=False)

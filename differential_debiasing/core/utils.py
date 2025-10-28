@@ -6,7 +6,7 @@ import math
 import numbers
 import numpy as np
 import pandas as pd
-from typing import Union, Tuple, Optional, List, Any
+from typing import Union, Tuple, Optional, List, Any, Dict
 import warnings
 
 
@@ -381,6 +381,107 @@ def compute_abb_constraint_validation(tau: float,
         'score_range': float(rng) if rng is not None else None,
         'constraint_formula': formula,
     }
+
+
+def calculate_effective_alpha(bias_sensitivity: float,
+                              score_range: float,
+                              tau: float,
+                              delta: float,
+                              *,
+                              shrink_alpha: Optional[float] = None,
+                              target_tau: Optional[float] = None) -> float:
+    """
+    Resolve the effective shrinkage alpha consistent with the ABB mechanism.
+
+    This mirrors the calculation used by ``DifferentialDebias.fit`` so callers
+    (including analysis scripts) can reason about the same value before invoking
+    the debiaser.
+    """
+    if shrink_alpha is not None:
+        return float(shrink_alpha)
+
+    if target_tau is None:
+        return 1.0
+
+    rng = float(score_range)
+    if rng <= 0 or bias_sensitivity <= 0:
+        return 1.0
+
+    delta_star_norm = float(bias_sensitivity) / rng
+    tau_norm = float(target_tau) / rng
+    if delta_star_norm <= 0:
+        return 1.0
+
+    delta_factor = float(np.sqrt(2.0 / float(delta)))
+    alpha_max = tau_norm / (delta_star_norm * delta_factor)
+    return float(max(0.0, min(1.0, alpha_max)))
+
+
+def estimate_s_mu_norm(n_samples: int,
+                       *,
+                       shrink_center: str = "mean",
+                       dimensionality: Optional[int] = None) -> float:
+    """
+    Estimate the normalized shrinkage radius (S_μ) used in ABB prechecks.
+
+    Currently this mirrors the heuristic used in the analysis workflow, which
+    assumes an effective dimensionality of ``n_samples`` when none is provided.
+    """
+    if n_samples <= 0:
+        return 0.0
+
+    center = (shrink_center or "").lower()
+    if center not in ("mean", "median"):
+        return 0.0
+
+    d_eff = dimensionality if dimensionality is not None else n_samples
+    if d_eff <= 0:
+        return 0.0
+
+    return float(min(1.0, (float(d_eff) ** 0.5) / max(float(n_samples), 1.0)))
+
+
+def build_abb_precheck(tau: float,
+                       delta: float,
+                       sensitivity: float,
+                       score_range: Optional[float],
+                       *,
+                       alpha: float = 1.0,
+                       s_mu_norm: float = 0.0,
+                       label: str = 'Δ*₂(f,D)') -> Dict[str, float]:
+    """
+    Construct a canonical ABB precheck summary, reusing
+    ``compute_abb_constraint_validation`` for normalized quantities.
+    """
+    effective_sensitivity = float(sensitivity) * float(alpha)
+    validation = compute_abb_constraint_validation(
+        tau=float(tau),
+        delta=float(delta),
+        sensitivity=effective_sensitivity,
+        score_range=score_range,
+        label=label,
+    )
+
+    delta_factor = float(np.sqrt(2.0 / float(delta)))
+    normalized_sensitivity = validation.get('normalized_sensitivity')
+    if normalized_sensitivity is None:
+        a_component = effective_sensitivity * delta_factor
+    else:
+        a_component = float(normalized_sensitivity) * delta_factor
+
+    b_component = float(s_mu_norm) * delta_factor
+
+    validation.update(
+        {
+            'effective_sensitivity': effective_sensitivity,
+            'alpha': float(alpha),
+            's_mu_norm': float(s_mu_norm),
+            'delta_factor': delta_factor,
+            'A_component': float(a_component),
+            'B_component': float(b_component),
+        }
+    )
+    return validation
 
 
 def estimate_r_squared_from_scores(df: pd.DataFrame, 

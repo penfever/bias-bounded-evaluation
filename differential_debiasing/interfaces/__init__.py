@@ -9,6 +9,8 @@ from .judge_data import (
     extract_scores_from_evaluations,
     load_and_prepare_score_data,
     get_arena_score_mapping,
+    get_dataset_judge_mapping,
+    determine_score_scale,
 )
 
 __all__ = [
@@ -20,4 +22,6 @@ __all__ = [
     "extract_scores_from_evaluations",
     "load_and_prepare_score_data",
     "get_arena_score_mapping",
+    "get_dataset_judge_mapping",
+    "determine_score_scale",
 ]

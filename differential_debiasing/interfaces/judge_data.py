@@ -31,6 +31,16 @@ _JUDGE_CONFIG_MAPPING: Dict[str, str] = {
     "deepseek-r1-32b-gguf": "local/deepseek-r1-32b-gguf.yaml",
 }
 
+_DATASET_TO_JUDGE_MAPPING: Dict[str, str] = {
+    "QwQ-32B-setting1": "qwq-32b-gguf",
+    "DeepSeek-R1-32B-setting1": "deepseek-r1-32b-gguf",
+    "DeepSeek-R1-32B-setting2": "deepseek-r1-32b-gguf",
+    "DeepSeek-R1-32B-setting3": "deepseek-r1-32b-gguf",
+    "GPT-3.5-Turbo-0125-setting1": "gpt-3.5-turbo",
+    "GPT-4o-mini-0718-setting1": "gpt-4o-mini",
+    "GPT-4o-mini-0718-setting2": "gpt-4o-mini",
+}
+
 _ARENA_SCORE_MAPPING: Dict[str, int] = {
     "": 3,
     "A>>B": 1,
@@ -44,6 +54,8 @@ _ARENA_SCORE_MAPPING: Dict[str, int] = {
     "B<A": 2,
     "B<<A": 1,
 }
+
+DEFAULT_SCORE_RANGE: Tuple[float, float] = (1.0, 5.0)
 
 
 def get_judge_config_path(judge_name: str, configs_root: Optional[Path] = None) -> Path:
@@ -125,6 +137,11 @@ def get_arena_score_mapping() -> Dict[str, int]:
     return _ARENA_SCORE_MAPPING.copy()
 
 
+def get_dataset_judge_mapping() -> Dict[str, str]:
+    """Return the default mapping from dataset identifiers to judge names."""
+    return _DATASET_TO_JUDGE_MAPPING.copy()
+
+
 def extract_scores_from_evaluations(
     evaluations: Dict[str, List[Dict[str, Any]]],
     *,
@@ -192,3 +209,27 @@ def load_and_prepare_score_data(
     if len(df) < min_samples:
         raise ValueError(f"Not enough evaluations for debiasing ({len(df)})")
     return df
+
+
+def determine_score_scale(
+    df: pd.DataFrame,
+    *,
+    score_suffix: str = "_score",
+    fallback_range: Tuple[float, float] = DEFAULT_SCORE_RANGE,
+) -> Tuple[float, float, float]:
+    """
+    Derive a unified score scale (min, max, range) from DataFrame columns.
+    """
+    score_cols = [col for col in df.columns if col.endswith(score_suffix)]
+    if score_cols:
+        combined = pd.concat([df[c] for c in score_cols], axis=0)
+        score_min = float(combined.min())
+        score_max = float(combined.max())
+        score_range = float(score_max - score_min)
+        if score_range <= 0:
+            score_min, score_max = fallback_range
+            score_range = float(score_max - score_min)
+    else:
+        score_min, score_max = fallback_range
+        score_range = float(score_max - score_min)
+    return score_min, score_max, score_range
