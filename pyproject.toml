@@ -6,7 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "differential-debiasing"
 version = "0.1.0"
 authors = [
-    {name = "Benjamin Feuer", email = "penfever@gmail.com"},
+    {name = "Benjamin Feuer", email = "bf996@nyu.edu"},
+    {name = "Lucas Rosenblatt", email = "lucas.rosenblatt@nyu.edu"},
 ]
 description = "Differential privacy-inspired techniques for reducing implicit bias in LLM judge evaluations"
 readme = "README.md"
@@ -18,10 +19,8 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Security :: Cryptography",
 ]
@@ -95,7 +94,7 @@ markers = [
 
 [tool.black]
 line-length = 100
-target-version = ['py38', 'py39', 'py310', 'py311']
+target-version = ['py311', 'py312']
 include = '\.pyi?$'
 extend-exclude = '''
 /(
