@@ -61,8 +61,11 @@ dev = [
     "flake8>=3.9.0",
     "pre-commit>=2.15.0",
 ]
+cp = [
+    "torchcp",
+]
 all = [
-    "differential-debiasing[judge-integration,visualization,dev]",
+    "differential-debiasing[judge-integration,oumi-integration,visualization,dev,cp]",
 ]
 
 [project.scripts]

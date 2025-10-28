@@ -16,8 +16,15 @@ from dataclasses import dataclass
 
 try:
     import torchcp
-    from torchcp.classification import SplitCP, RAPS
-    from torchcp.regression import SplitCP as RegressionSplitCP
+    from torchcp.classification import RAPS
+    try:
+        from torchcp.classification import SplitCP  # torchcp<=1.1
+    except ImportError:
+        from torchcp.classification import SplitPredictor as SplitCP  # torchcp>=1.2
+    try:
+        from torchcp.regression import SplitCP as RegressionSplitCP  # torchcp<=1.1
+    except ImportError:
+        from torchcp.regression import SplitPredictor as RegressionSplitCP  # torchcp>=1.2
     TORCHCP_AVAILABLE = True
 except ImportError:
     TORCHCP_AVAILABLE = False

@@ -45,9 +45,9 @@ class TestPsychometricReliabilitySensitivity:
     def test_initialization(self):
         """Test proper initialization of PsychometricReliabilitySensitivity."""
         estimator = PsychometricReliabilitySensitivity()
-        assert estimator.alpha_weight == 1/3
-        assert estimator.clr_weight == 1/3
-        assert estimator.htmt_weight == 1/3
+        assert estimator.alpha_weight == 0.5
+        assert estimator.clr_weight == 0.25
+        assert estimator.htmt_weight == 0.25
         assert estimator.clr_max == 2.0
         assert estimator.htmt_threshold == 0.85
         assert not estimator._fitted
