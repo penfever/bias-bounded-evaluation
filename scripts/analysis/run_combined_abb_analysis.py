@@ -206,8 +206,8 @@ def run_combined_abb_analysis(
 
             # Compute combined fixed sensitivity for this approach
             component_values = {
-                'formatting': ctx if ctx > 0 else 1e-3,
-                'schematic': schem_ctx if schem_ctx > 0 else 1e-3,
+                'formatting': ctx if ctx > 0 else 1e-6,
+                'schematic': schem_ctx if schem_ctx > 0 else 1e-6,
             }
             combined_fixed = _combine_sensitivity(approach_name, component_values, extra_params)
 

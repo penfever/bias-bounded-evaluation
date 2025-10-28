@@ -100,7 +100,7 @@ def detect_baseline_model(judge_dir: Union[str, Path]) -> Optional[str]:
                     if parsed is None:
                         continue
                     lo, hi = parsed
-                    if abs(lo) < 1e-3 and abs(hi) < 1e-3:
+                    if abs(lo) < 1e-6 and abs(hi) < 1e-6:
                         baseline_candidates.append(str(row['model']))
             if not baseline_candidates and {'rating_q025','rating_q975'} <= set(df.columns):
                 for _, row in df.iterrows():

@@ -242,7 +242,7 @@ class TestDifferentialDebias:
         
         assert bounds['tau'] == 0.5
         assert bounds['delta'] == 0.05
-        assert bounds['max_bias_ratio'] == pytest.approx(np.exp(0.5), rel=1e-3)
+        assert bounds['max_bias_ratio'] == pytest.approx(np.exp(0.5), rel=1e-6)
         assert bounds['bias_sensitivity'] > 0
         assert bounds['noise_std'] > 0
     

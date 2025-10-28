@@ -324,9 +324,9 @@ class DifferentialDebias:
         # Calculate noise parameter - use A-BB formula if ABB estimator
         if isinstance(self.sensitivity_estimator, (ABBSensitivity, CombinedABBSensitivity, FixedSensitivityEstimator)):
             # A-BB mechanism
-            # Infer dimensionality if not provided
+            # Assume complete independence of dimensions (factors) unless dimensionality specified
             if self.dimensionality is None:
-                self.dimensionality = len(judgments)
+                self.dimensionality = 1
             
             sigma = calculate_abb_noise_parameter(
                 rms_sensitivity=(self._bias_sensitivity / (score_max - score_min)) * float(self._effective_alpha or 1.0),

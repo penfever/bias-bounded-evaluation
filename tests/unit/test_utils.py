@@ -117,7 +117,7 @@ class TestNoiseCalculation:
         
         # Average case should have less noise
         assert sigma_individual > sigma_average
-        assert sigma_individual == pytest.approx(sigma_average * np.sqrt(100), rel=1e-3)
+        assert sigma_individual == pytest.approx(sigma_average * np.sqrt(100), rel=1e-6)
     
     def test_calculate_noise_parameter_scaling(self):
         """Test noise parameter scaling with different parameters."""
