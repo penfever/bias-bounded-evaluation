@@ -21,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
+from differential_debiasing.interfaces import get_judge_config_path
 from differential_debiasing.interfaces.oumi_interface import create_oumi_judge_function
 from differential_debiasing.core.utils import rms_from_differences
 from differential_debiasing.interfaces.arena_hard_utils import (
@@ -29,26 +30,6 @@ from differential_debiasing.interfaces.arena_hard_utils import (
     parse_arena_hard_prompt,
     setting_dir_for_judge,
 )
-
-
-def get_judge_config_path(judge_name: str) -> Path:
-    base_config_dir = Path(__file__).parent.parent.parent / "configs" / "judges"
-    judge_mapping = {
-        # OpenAI models
-        "gpt-3.5-turbo": "openai/gpt-3.5-turbo.yaml",
-        "gpt-4o-mini": "openai/gpt-4o-mini.yaml",
-        # Anthropic
-        "claude-3-5-sonnet": "anthropic/claude-3-5-sonnet.yaml",
-        # Local GGUF
-        "qwq-32b-gguf": "local/qwq-32b-gguf.yaml",
-        "deepseek-r1-32b-gguf": "local/deepseek-r1-32b-gguf.yaml",
-    }
-    if judge_name not in judge_mapping:
-        raise FileNotFoundError(f"Unknown judge '{judge_name}'. Available: {sorted(judge_mapping.keys())}")
-    path = base_config_dir / judge_mapping[judge_name]
-    if not path.exists():
-        raise FileNotFoundError(f"Judge config not found: {path}")
-    return path
 
 
 def main():

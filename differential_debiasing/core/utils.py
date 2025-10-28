@@ -2,10 +2,35 @@
 Utility functions for differential debiasing
 """
 
+import math
+import numbers
 import numpy as np
 import pandas as pd
-from typing import Union, Tuple, Optional, List
+from typing import Union, Tuple, Optional, List, Any
 import warnings
+
+
+def round_sig(x: float, sig: int = 3) -> float:
+    """Round a float to the requested number of significant digits."""
+    try:
+        if x == 0 or not math.isfinite(float(x)):
+            return float(x)
+        return float(round(x, sig - int(math.floor(math.log10(abs(x)))) - 1))
+    except Exception:
+        return float(x)
+
+
+def round_nested(obj: Any, sig: int = 3):
+    """Recursively round floats within nested containers."""
+    if isinstance(obj, float):
+        return round_sig(obj, sig)
+    if isinstance(obj, numbers.Number):
+        return obj
+    if isinstance(obj, list):
+        return [round_nested(v, sig) for v in obj]
+    if isinstance(obj, dict):
+        return {k: round_nested(v, sig) for k, v in obj.items()}
+    return obj
 
 
 def normalize_judgments(judgments: np.ndarray, 
@@ -322,10 +347,9 @@ def compute_abb_constraint_validation(tau: float,
     """
     Compute A-BB constraint validation.
 
-    If score_range is provided and > 0, sensitivity is normalized by score_range
-    before applying the threshold; the returned dict includes both the raw
-    sensitivity (combined_sensitivity) and the normalized value used for the
-    check.
+    When score_range is provided and positive, both the sensitivity and tau are
+    normalized by that range before evaluating the constraint. The returned dict
+    includes the raw and normalized values so callers can log or reuse either form.
     """
     tau = float(tau)
     delta = float(delta)
@@ -333,22 +357,27 @@ def compute_abb_constraint_validation(tau: float,
     rng = float(score_range) if score_range is not None else None
 
     if rng is not None and rng > 0:
-        normalized = sensitivity / rng
-        threshold = normalized * float(np.sqrt(2.0 / delta))
-        formula = 'τ > Δ̂ * sqrt(2/δ)'
+        normalized_sensitivity = sensitivity / rng
+        normalized_tau = tau / rng
+        threshold = normalized_sensitivity * float(np.sqrt(2.0 / delta))
+        margin = normalized_tau - threshold
+        formula = 'τ̂ > Δ̂ * sqrt(2/δ)'
     else:
-        normalized = None
+        normalized_sensitivity = None
+        normalized_tau = None
         threshold = sensitivity * float(np.sqrt(2.0 / delta))
+        margin = tau - threshold
         formula = f'τ > {label} * sqrt(2/δ)'
 
     return {
-        'constraint_satisfied': bool(tau > threshold),
+        'constraint_satisfied': bool(margin > 0),
         'tau': tau,
         'delta': delta,
         'combined_sensitivity': sensitivity,
-        'normalized_sensitivity': float(normalized) if normalized is not None else None,
+        'normalized_tau': float(normalized_tau) if normalized_tau is not None else None,
+        'normalized_sensitivity': float(normalized_sensitivity) if normalized_sensitivity is not None else None,
         'constraint_threshold': float(threshold),
-        'margin': float(tau - threshold),
+        'margin': float(margin),
         'score_range': float(rng) if rng is not None else None,
         'constraint_formula': formula,
     }

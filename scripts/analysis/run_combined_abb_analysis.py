@@ -22,311 +22,20 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from differential_debiasing.core.debias import DifferentialDebias
 from differential_debiasing.core.config import ConfigManager
-from differential_debiasing.core.sensitivity_profiles import (
-    load_judge_sensitivity_profile,
-    get_formatting_sensitivity,
-    load_intrinsic_sensitivity_profile,
-    SensitivityProfileManager,
+from differential_debiasing.core.sensitivity_profiles import collect_profile_info
+from differential_debiasing.core.utils import (
+    context_adjusted_rms,
+    compute_abb_constraint_validation,
+    round_nested,
 )
-from differential_debiasing.core.utils import context_adjusted_rms, compute_abb_constraint_validation
-
-# --- Local helpers -----------------------------------------------------------
-def _round_sig(x: float, sig: int = 3) -> float:
-    try:
-        import math
-        if x == 0 or not math.isfinite(float(x)):
-            return float(x)
-        return float(round(x, sig - int(math.floor(math.log10(abs(x)))) - 1))
-    except Exception:
-        return float(x)
-
-def _round_nested(obj, sig: int = 3):
-    # Recursively round floats in nested structures to sig significant digits
-    import numbers
-    if isinstance(obj, float):
-        return _round_sig(obj, sig)
-    if isinstance(obj, list):
-        return [_round_nested(v, sig) for v in obj]
-    if isinstance(obj, dict):
-        return {k: _round_nested(v, sig) for k, v in obj.items()}
-    # Leave ints, bools, None, strings as-is
-    return obj
+from differential_debiasing.interfaces import (
+    get_judge_config_path,
+    find_judge_data_directories,
+    load_and_prepare_score_data,
+)
 from differential_debiasing.sensitivity.psychometric_reliability import PsychometricReliabilitySensitivity
 from differential_debiasing.sensitivity.schematic_adherence import SchematicAdherenceSensitivity
 # Note: Oumi judge interface is imported lazily only when needed
-
-def get_judge_config_path(judge_name: str) -> Path:
-    """Get the correct config path for a judge based on the new directory structure."""
-    # Get the base config directory (go up from scripts/analysis to root)
-    base_config_dir = Path(__file__).parent.parent.parent / "configs" / "judges"
-    
-    # Map judge names to their correct subdirectories
-    judge_mapping = {
-        # OpenAI models
-        "gpt-3.5-turbo": "openai/gpt-3.5-turbo.yaml",
-        "gpt-4o-mini": "openai/gpt-4o-mini.yaml",
-        
-        # Anthropic models  
-        "claude-3-5-sonnet": "anthropic/claude-3-5-sonnet.yaml",
-        
-        # Local GGUF models
-        "qwq-32b-gguf": "local/qwq-32b-gguf.yaml",
-        "deepseek-r1-32b-gguf": "local/deepseek-r1-32b-gguf.yaml",
-    }
-    
-    if judge_name in judge_mapping:
-        config_path = base_config_dir / judge_mapping[judge_name]
-        if config_path.exists():
-            return config_path
-    
-    # No fallback - fail fast if not found
-    raise FileNotFoundError(f"Judge config not found for '{judge_name}'. Expected at one of: {list(judge_mapping.values())}")
-
-def find_judge_data_directories(base_path: Path) -> Dict[str, Path]:
-    """Find judge directories with base_processed data."""
-    judge_dirs = {}
-    
-    # Pattern for the judge settings we want to process (diverse set of judges)
-    patterns = [
-        "QwQ-32B-setting1",
-        "DeepSeek-R1-32B-setting1", 
-        "DeepSeek-R1-32B-setting2",
-        "GPT-3.5-Turbo-0125-setting1",
-        "GPT-4o-mini-0718-setting1"
-    ]
-    
-    for pattern in patterns:
-        judge_dir = base_path / pattern
-        if judge_dir.exists() and judge_dir.is_dir():
-            # Check for base_processed directory with JSONL files
-            base_processed_dir = judge_dir / "base_processed"
-            if base_processed_dir.exists() and any(base_processed_dir.glob("*.jsonl")):
-                judge_dirs[pattern] = judge_dir
-                print(f"Found judge data: {pattern} -> {judge_dir}")
-    
-    return judge_dirs
-
-def load_judge_evaluations(base_processed_dir: Path) -> Dict[str, List[Dict]]:
-    """Load all judge evaluations from JSONL files."""
-    print(f"Loading evaluations from {base_processed_dir}...")
-    
-    evaluations = {}
-    
-    for jsonl_file in base_processed_dir.glob("*.jsonl"):
-        model_name = jsonl_file.stem
-        model_evaluations = []
-        
-        try:
-            with open(jsonl_file, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            data = json.loads(line)
-                            model_evaluations.append(data)
-                        except json.JSONDecodeError as e:
-                            print(f"Warning: Skipping invalid JSON line in {jsonl_file}: {e}")
-                            continue
-            
-            if model_evaluations:
-                evaluations[model_name] = model_evaluations
-                print(f"  Loaded {len(model_evaluations)} evaluations for {model_name}")
-        
-        except Exception as e:
-            print(f"Error loading {jsonl_file}: {e}")
-            continue
-    
-    return evaluations
-
-def get_score_mapping():
-    """Get the score mapping dictionary."""
-    return {
-        '': 3,
-        'A>>B': 1,
-        'A>B': 2, 
-        'A=B': 3,
-        'B>A': 4,
-        'B>>A': 5,
-        'A<<B': 5,
-        'A<B': 4,
-        'B=A': 3,
-        'B<A': 2,
-        'B<<A': 1
-    }
-
-def extract_scores_from_evaluations(evaluations: Dict[str, List[Dict]]) -> pd.DataFrame:
-    """Extract all scores from evaluations using Arena-Hard-Auto Likert scale transformations."""
-    # Score mapping for conversion from comparative judgments to 5-point Likert scale
-    score_mapping = get_score_mapping()
-    
-    all_scores = []
-    
-    for model_name, model_evaluations in evaluations.items():
-        for eval_data in model_evaluations:
-            question_id = eval_data.get('question_id', '')
-            games = eval_data.get('games', [])
-            
-            for game_idx, game in enumerate(games):
-                # Initialize score data
-                score_data = {
-                    'model': model_name,
-                    'question_id': question_id,
-                    'game_index': game_idx,
-                }
-                
-                # Extract scores for each factor using the actual game data
-                factor_fields = ['score', 'correctness_score', 'completeness_score', 
-                               'safety_score', 'conciseness_score', 'style_score']
-                
-                for factor in factor_fields:
-                    if factor in game:
-                        # Get the raw judgment value
-                        raw_judgment = game[factor]
-                        
-                        # Convert using the score mapping from Arena-Hard-Auto
-                        if isinstance(raw_judgment, str) and raw_judgment.strip():
-                            numeric_score = score_mapping.get(raw_judgment.strip(), 3)  # Default to 3 (tie)
-                        else:
-                            numeric_score = 3  # Default to neutral/tie
-                        
-                        score_data[factor] = float(numeric_score)
-                    else:
-                        # If factor not present, default to neutral score
-                        score_data[factor] = 3.0
-                
-                # Ensure we have an overall score
-                if 'overall_score' not in score_data:
-                    score_data['overall_score'] = score_data.get('score', 3.0)
-                
-                all_scores.append(score_data)
-    
-    df = pd.DataFrame(all_scores)
-    
-    if len(df) > 0:
-        print(f"Extracted {len(df)} real judge evaluations with Likert scale scores")
-        print(f"Models: {sorted(df['model'].unique())}")
-        print(f"Score ranges: {[(col, df[col].min(), df[col].max()) for col in df.columns if col.endswith('_score')]}")
-    else:
-        print("Warning: No scores extracted from evaluations")
-    
-    return df
-
-def load_and_prepare_score_data(judge_name: str, base_path: Path) -> pd.DataFrame:
-    """Load real judge evaluation data and prepare it for Combined A-BB analysis."""
-    print(f"Loading real evaluation data for {judge_name}...")
-    
-    # Find the judge directory
-    judge_dir = base_path / judge_name
-    if not judge_dir.exists():
-        raise ValueError(f"Judge directory not found: {judge_dir}")
-    
-    # Load evaluations from base_processed directory
-    base_processed_dir = judge_dir / "base_processed"
-    if not base_processed_dir.exists():
-        raise ValueError(f"Base processed directory not found: {base_processed_dir}")
-    
-    # Load judge evaluations
-    evaluations = load_judge_evaluations(base_processed_dir)
-    if not evaluations:
-        raise ValueError(f"No evaluations found in {base_processed_dir}")
-    
-    # Extract scores for debiasing analysis
-    scores_df = extract_scores_from_evaluations(evaluations)
-    if len(scores_df) < 10:
-        raise ValueError(f"Not enough evaluations for debiasing ({len(scores_df)})")
-    
-    return scores_df
-
-## Synthetic judge removed: script now exclusively uses real judges via Oumi
-
-def check_sensitivity_profiles(real_judge_name: str, dataset_id: str) -> Dict[str, Any]:
-    """
-    Check for available sensitivity profiles for a judge.
-    
-    Parameters:
-    -----------
-    real_judge_name : str
-        Name of the real judge to check
-        
-    Returns:
-    --------
-    Dict[str, Any] : Profile availability and values
-    """
-    # Look for profiles in the project root sensitivity_profiles directory
-    profile_dir = Path(__file__).parent.parent.parent / "sensitivity_profiles"
-    
-    profile_info = {
-        'profile_available': False,
-        'formatting_sensitivity': None,
-        'hamming_sensitivity': None,
-        'combined_average_sensitivity': None,
-        'intrinsic_sensitivity': None,
-        'context_adjusted_rms': None,
-        'profile_dir': str(profile_dir)
-    }
-    
-    try:
-        profile = load_judge_sensitivity_profile(real_judge_name, profile_dir)
-        if profile:
-            formatting_sensitivity = profile.get_formatting_sensitivity()
-            if formatting_sensitivity is not None:
-                profile_info['formatting_sensitivity'] = formatting_sensitivity
-                profile_info['profile_available'] = True
-                print(f"✅ Found formatting profile for {real_judge_name}: {formatting_sensitivity:.4f}")
-            else:
-                print(f"⚠️ Profile found for {real_judge_name} but formatting sensitivity is missing/failed")
-
-            # Optional values: hamming and combined average, if present in the profile
-            try:
-                ham = profile.get_hamming_sensitivity() if hasattr(profile, 'get_hamming_sensitivity') else None
-                if ham is not None:
-                    profile_info['hamming_sensitivity'] = float(ham)
-                    # Intentionally no print: hamming is not used in this script
-            except Exception:
-                pass
-            try:
-                cav = profile.get_combined_average_sensitivity() if hasattr(profile, 'get_combined_average_sensitivity') else None
-                if cav is not None:
-                    profile_info['combined_average_sensitivity'] = float(cav)
-            except Exception:
-                pass
-
-        # Try dataset-scoped intrinsic jitter profile
-        mgr = SensitivityProfileManager(profile_dir)
-        intrinsic = mgr.get_intrinsic_sensitivity_for_dataset(real_judge_name, dataset_id)
-        if intrinsic is None:
-            # Fallback: use any intrinsic profile available for this judge
-            fallback = mgr.find_any_intrinsic_profile_for_judge(real_judge_name)
-            if fallback is not None:
-                fb_dataset, fb_prof = fallback
-                intrinsic = fb_prof.get_intrinsic_sensitivity()
-                if intrinsic is not None:
-                    print(f"✅ Using fallback intrinsic from dataset={fb_dataset} for judge={real_judge_name}: {intrinsic:.4f}")
-        if intrinsic is not None:
-            profile_info['intrinsic_sensitivity'] = intrinsic
-            print(f"✅ Found intrinsic jitter for ({dataset_id}, {real_judge_name}): {intrinsic:.4f}")
-        else:
-            print(f"📋 No intrinsic jitter profile found for dataset={dataset_id}, judge={real_judge_name}")
-
-        # Derive context-adjusted RMS; if intrinsic missing, proceed with formatting as-is
-        if profile_info['formatting_sensitivity'] is not None:
-            tot = float(profile_info['formatting_sensitivity'])
-            if profile_info['intrinsic_sensitivity'] is not None:
-                intr = float(profile_info['intrinsic_sensitivity'])
-                print(f"   ↪︎ context_adjusted_rms inputs (check_sensitivity_profiles): formatting_total={tot:.4f}, intrinsic={intr:.4f}")
-                ctx = context_adjusted_rms(tot, intr)
-            else:
-                ctx = tot
-                print(f"ℹ️ Intrinsic missing; using formatting RMS as context-adjusted value: {ctx:.4f}")
-            profile_info['context_adjusted_rms'] = ctx
-            print(f"🎯 Context-adjusted RMS for ({dataset_id}, {real_judge_name}): {ctx:.4f}")
-        else:
-            print(f"📋 No formatting sensitivity profile found for {real_judge_name}")
-    except Exception as e:
-        print(f"⚠️ Error loading profile for {real_judge_name}: {e}")
-    
-    return profile_info
-
 
 def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                               real_judge_name: str,
@@ -342,7 +51,7 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
     config_manager = ConfigManager()
     
     # Check for sensitivity profiles for the real judge, and dataset-scoped intrinsic jitter
-    profile_info = check_sensitivity_profiles(real_judge_name, dataset_id=judge_name)
+    profile_info = collect_profile_info(real_judge_name, judge_name, verbose=True)
     
     # Judge function not needed in this script (no dynamic generators)
     judge_function = None
@@ -581,18 +290,19 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                     d_eff = n_samples
                     s_mu_norm = float(min(1.0, (d_eff ** 0.5) / max(n_samples, 1)))
                 delta_factor = float(np.sqrt(2.0 / delta_val))
-                delta_hat_raw = float(combined_fixed / score_range)
+                delta_hat_raw = float(combined_fixed / score_range) if score_range > 0 else float(combined_fixed)
+                tau_norm = float(tau_val / score_range) if score_range > 0 else float(tau_val)
                 A = delta_hat_raw * delta_factor
                 B = float(s_mu_norm) * delta_factor
                 if enable_shrinkage:
                     if shrink_alpha is not None:
                         alpha_hat = float(shrink_alpha)
                     elif target_tau is not None and score_range > 0:
-                        tau_norm = float(target_tau / score_range)
+                        target_tau_norm = float(target_tau / score_range)
                         if A > B:
-                            alpha_hat = float(max(0.0, min(1.0, (tau_norm - B) / (A - B))))
+                            alpha_hat = float(max(0.0, min(1.0, (target_tau_norm - B) / (A - B))))
                         else:
-                            alpha_hat = 1.0 if tau_norm > B else 0.0
+                            alpha_hat = 1.0 if target_tau_norm > B else 0.0
                     else:
                         alpha_hat = 1.0
                 else:
@@ -602,9 +312,15 @@ def run_combined_abb_analysis(df: pd.DataFrame, judge_name: str,
                     tau=tau_val, delta=delta_val, sensitivity=eff_sens, score_range=score_range
                 )
                 delta_hat = precheck.get('normalized_sensitivity')
+                tau_norm_report = precheck.get('normalized_tau', tau_norm)
                 threshold = precheck.get('constraint_threshold')
                 margin = precheck.get('margin')
-                print(f"    A-BB precheck: tau={tau_val:.3f}, delta={delta_val:.3f}, α̂={alpha_hat:.3f}, Sμ̂={s_mu_norm:.4f}, A={A:.4f}, B={B:.4f}, Δ̂eff={delta_hat:.4f}, threshold={threshold:.4f}, margin={margin:.4f} (range={score_range:.3f})")
+                print(
+                    f"    A-BB precheck (normalized): tau={tau_norm_report:.4f} (raw {tau_val:.3f}), "
+                    f"delta={delta_val:.3f}, α̂={alpha_hat:.3f}, Sμ̂={s_mu_norm:.4f}, "
+                    f"A={A:.4f}, B={B:.4f}, Δ̂eff={delta_hat:.4f}, "
+                    f"threshold={threshold:.4f}, margin={margin:.4f} (range={score_range:.3f})"
+                )
                 if strict_abb and float(margin) <= 0.0:
                     msg = (
                         f"Strict mode: A-BB precheck failed (tau={tau_val:.6f} <= threshold={threshold:.6f}); skipping strategy"
@@ -1012,7 +728,7 @@ def main(args):
                     summary_approaches[approach_name] = approach_data
             summary_results[judge_name]['approaches'] = summary_approaches
     
-    rounded_results = _round_nested(summary_results, sig=3)
+    rounded_results = round_nested(summary_results, sig=3)
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(rounded_results, f, indent=2, ensure_ascii=False)
     

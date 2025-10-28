@@ -13,6 +13,8 @@ from typing import Dict, Any, Optional, List, Union, Tuple
 from datetime import datetime, timezone
 import warnings
 
+from .utils import context_adjusted_rms
+
 
 class SensitivityProfile:
     """
@@ -510,5 +512,96 @@ def validate_all_profiles(profile_dir: Union[str, Path] = "sensitivity_profiles"
     
     for judge_name in manager.list_profiles():
         results[judge_name] = manager.validate_profile(judge_name)
-    
+
     return results
+
+
+def collect_profile_info(
+    judge_name: str,
+    dataset_id: str,
+    profile_dir: Union[str, Path] = "sensitivity_profiles",
+    *,
+    verbose: bool = False,
+) -> Dict[str, Any]:
+    """
+    Gather formatting and intrinsic sensitivity information for a judge.
+    """
+    profile_dir = Path(profile_dir)
+    info: Dict[str, Any] = {
+        "profile_available": False,
+        "formatting_sensitivity": None,
+        "hamming_sensitivity": None,
+        "combined_average_sensitivity": None,
+        "intrinsic_sensitivity": None,
+        "context_adjusted_rms": None,
+        "profile_dir": str(profile_dir),
+    }
+
+    try:
+        profile = load_judge_sensitivity_profile(judge_name, profile_dir)
+        if profile:
+            fmt = profile.get_formatting_sensitivity()
+            if fmt is not None:
+                info["formatting_sensitivity"] = float(fmt)
+                info["profile_available"] = True
+                if verbose:
+                    print(f"✅ Found formatting profile for {judge_name}: {fmt:.4f}")
+            elif verbose:
+                print(f"⚠️ Profile found for {judge_name} but formatting sensitivity is missing/failed")
+
+            try:
+                ham = profile.get_hamming_sensitivity()
+                if ham is not None:
+                    info["hamming_sensitivity"] = float(ham)
+            except Exception:
+                pass
+            try:
+                avg = profile.get_combined_average_sensitivity()
+                if avg is not None:
+                    info["combined_average_sensitivity"] = float(avg)
+            except Exception:
+                pass
+
+        mgr = SensitivityProfileManager(profile_dir)
+        intrinsic = mgr.get_intrinsic_sensitivity_for_dataset(judge_name, dataset_id)
+        if intrinsic is None:
+            fallback = mgr.find_any_intrinsic_profile_for_judge(judge_name)
+            if fallback is not None:
+                fb_dataset, fb_profile = fallback
+                intrinsic = fb_profile.get_intrinsic_sensitivity()
+                if intrinsic is not None and verbose:
+                    print(
+                        f"✅ Using fallback intrinsic from dataset={fb_dataset} "
+                        f"for judge={judge_name}: {intrinsic:.4f}"
+                    )
+        if intrinsic is not None:
+            info["intrinsic_sensitivity"] = float(intrinsic)
+            if verbose:
+                print(f"✅ Found intrinsic jitter for ({dataset_id}, {judge_name}): {intrinsic:.4f}")
+        elif verbose:
+            print(f"📋 No intrinsic jitter profile found for dataset={dataset_id}, judge={judge_name}")
+
+        fmt_value = info.get("formatting_sensitivity")
+        if fmt_value is not None:
+            if info.get("intrinsic_sensitivity") is not None:
+                ctx = context_adjusted_rms(fmt_value, float(info["intrinsic_sensitivity"]))
+                if verbose:
+                    print(
+                        f"   ↪︎ context_adjusted_rms inputs: "
+                        f"formatting_total={fmt_value:.4f}, intrinsic={info['intrinsic_sensitivity']:.4f}"
+                    )
+            else:
+                ctx = fmt_value
+                if verbose:
+                    print(f"ℹ️ Intrinsic missing; using formatting RMS as context-adjusted value: {ctx:.4f}")
+            info["context_adjusted_rms"] = float(ctx)
+            if verbose:
+                print(f"🎯 Context-adjusted RMS for ({dataset_id}, {judge_name}): {ctx:.4f}")
+        elif verbose:
+            print(f"📋 No formatting sensitivity profile found for {judge_name}")
+
+    except Exception as exc:
+        if verbose:
+            print(f"⚠️ Error loading profile for {judge_name}: {exc}")
+
+    return info

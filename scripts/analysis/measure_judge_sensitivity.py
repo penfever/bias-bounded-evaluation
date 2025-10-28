@@ -29,31 +29,7 @@ from differential_debiasing.interfaces.oumi_interface import create_oumi_judge_f
 from differential_debiasing.sensitivity.abb_sensitivity import ABBSensitivity
 from differential_debiasing.neighbors import FormattingNeighborGenerator
 from differential_debiasing.interfaces.arena_hard_utils import find_sample_data as find_arena_sample_data
-
-
-def get_judge_config_path(judge_name: str) -> Path:
-    """Get the correct config path for a judge based on the directory structure."""
-    base_config_dir = Path(__file__).parent.parent.parent / "configs" / "judges"
-    
-    judge_mapping = {
-        # OpenAI models
-        "gpt-3.5-turbo": "openai/gpt-3.5-turbo.yaml",
-        "gpt-4o-mini": "openai/gpt-4o-mini.yaml",
-        
-        # Anthropic models  
-        "claude-3-5-sonnet": "anthropic/claude-3-5-sonnet.yaml",
-        
-        # Local GGUF models
-        "qwq-32b-gguf": "local/qwq-32b-gguf.yaml",
-        "deepseek-r1-32b-gguf": "local/deepseek-r1-32b-gguf.yaml",
-    }
-    
-    if judge_name in judge_mapping:
-        config_path = base_config_dir / judge_mapping[judge_name]
-        if config_path.exists():
-            return config_path
-    
-    raise FileNotFoundError(f"Judge config not found for '{judge_name}'. Expected at one of: {list(judge_mapping.values())}")
+from differential_debiasing.interfaces import get_judge_config_path
 
 
 # (find_sample_data moved to differential_debiasing.interfaces.arena_hard_utils)

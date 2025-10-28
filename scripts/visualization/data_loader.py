@@ -13,28 +13,12 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Union
 import warnings
 warnings.filterwarnings('ignore')
-import sys
 
-# Import arena hard utilities for score conversion
-sys.path.append(str(Path(__file__).parent.parent.parent / 'differential_debiasing' / 'interfaces'))
-from arena_hard_utils import convert_scores_to_win_rates, bootstrap_to_win_rate_ci
-
-
-def get_score_mapping() -> Dict[str, int]:
-    """Get the score mapping dictionary for Arena-Hard-Auto Likert scale."""
-    return {
-        '': 3,
-        'A>>B': 1,
-        'A>B': 2, 
-        'A=B': 3,
-        'B>A': 4,
-        'B>>A': 5,
-        'A<<B': 5,
-        'A<B': 4,
-        'B=A': 3,
-        'B<A': 2,
-        'B<<A': 1
-    }
+from differential_debiasing.interfaces.arena_hard_utils import (
+    convert_scores_to_win_rates,
+    bootstrap_to_win_rate_ci,
+)
+from differential_debiasing.interfaces import get_arena_score_mapping
 
 
 def get_project_paths() -> Dict[str, Path]:
@@ -149,7 +133,7 @@ def load_original_evaluations(base_processed_dir: Union[str, Path]) -> pd.DataFr
     if not base_processed_dir.exists():
         raise ValueError(f"Base processed directory not found: {base_processed_dir}")
     
-    score_mapping = get_score_mapping()
+    score_mapping = get_arena_score_mapping()
     all_scores = []
     
     # Process each JSONL file
