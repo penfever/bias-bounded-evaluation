@@ -12,6 +12,10 @@ from .psychometric_reliability import PsychometricReliabilitySensitivity
 from .schematic_adherence import SchematicAdherenceSensitivity
 from ..neighbors import BaseNeighborGenerator, HammingNeighborGenerator, FormattingNeighborGenerator, OrderNeighborGenerator
 from ..core.utils import compute_abb_constraint_validation
+from ..core.sensitivity_profiles import (
+    SensitivityProfile,
+    load_judge_sensitivity_profile,
+)
 
 
 class CombinedABBSensitivity(SensitivityEstimator):
@@ -36,6 +40,8 @@ class CombinedABBSensitivity(SensitivityEstimator):
                  num_neighbors: int = 10,
                  # Optional: context-adjust all RMS-like estimates by removing intrinsic jitter RMS
                  context_adjust_intrinsic_rms: Optional[float] = None,
+                 sensitivity_profile: Optional[Union[SensitivityProfile, str, Dict[str, float]]] = None,
+                 profile_dir: Optional[str] = None,
                  **kwargs):
         """
         Initialize combined A-BB sensitivity estimator.
@@ -82,15 +88,86 @@ class CombinedABBSensitivity(SensitivityEstimator):
         self.num_neighbors = num_neighbors
         # If provided, subtract intrinsic jitter in quadrature from each RMS-like estimate
         self.context_adjust_intrinsic_rms = context_adjust_intrinsic_rms
-        
+        self._profile_dir = profile_dir or "sensitivity_profiles"
+        self.sensitivity_profile = self._load_profile(sensitivity_profile, self._profile_dir)
+        # Optional dict of direct overrides (e.g. when passing simple mapping)
+        self._profile_overrides: Dict[str, float] = {}
+        if isinstance(sensitivity_profile, dict):
+            self._profile_overrides = {
+                str(k).lower(): float(v) for k, v in sensitivity_profile.items() if v is not None
+            }
+
         # Set up random number generator
         self.rng = np.random.RandomState(kwargs.get('random_seed'))
-        
+
         # State tracking
         self._static_sensitivities = {}
         self._dynamic_sensitivities = {}
         self._combined_sensitivity = None
         self._measurement_details = {}
+        self._profile_based_generators: Dict[str, float] = {}
+
+    def _load_profile(
+        self,
+        profile: Optional[Union[SensitivityProfile, str, Dict[str, float]]],
+        profile_dir: str,
+    ) -> Optional[SensitivityProfile]:
+        """Load sensitivity profile from a variety of inputs."""
+
+        if profile is None or isinstance(profile, dict):
+            return None
+
+        if isinstance(profile, SensitivityProfile):
+            return profile
+
+        if isinstance(profile, str):
+            try:
+                return load_judge_sensitivity_profile(profile, profile_dir)
+            except Exception as exc:
+                print(f"Warning: failed to load sensitivity profile '{profile}': {exc}")
+                return None
+
+        return None
+
+    def _canonical_generator_name(
+        self, name: str, generator: BaseNeighborGenerator
+    ) -> str:
+        """Best-effort normalization of generator identifiers."""
+
+        lowered = str(name).lower()
+
+        if isinstance(generator, FormattingNeighborGenerator) or "format" in lowered:
+            return "formatting"
+        if isinstance(generator, HammingNeighborGenerator) or "hamming" in lowered:
+            return "hamming"
+        if isinstance(generator, OrderNeighborGenerator) or "order" in lowered:
+            return "order"
+        return lowered
+
+    def _get_profile_value_for_generator(
+        self, name: str, generator: BaseNeighborGenerator
+    ) -> Optional[float]:
+        """Return a cached sensitivity value for the given generator, if available."""
+
+        canonical = self._canonical_generator_name(name, generator)
+
+        if canonical in self._profile_overrides:
+            return self._profile_overrides[canonical]
+
+        if self.sensitivity_profile is None:
+            return None
+
+        try:
+            if canonical == "formatting":
+                return self.sensitivity_profile.get_formatting_sensitivity()
+            if canonical == "hamming":
+                getter = getattr(self.sensitivity_profile, "get_hamming_sensitivity", None)
+                if callable(getter):
+                    return getter()
+        except Exception as exc:
+            print(f"Warning: failed to read profile value for '{canonical}': {exc}")
+
+        return None
         
     def _create_static_estimators(self, estimators: List[Union[str, SensitivityEstimator]], **kwargs) -> Dict[str, SensitivityEstimator]:
         """Create static sensitivity estimators from list."""
@@ -205,32 +282,53 @@ class CombinedABBSensitivity(SensitivityEstimator):
                 self._static_sensitivities[name] = None
     
     def _fit_dynamic_estimators(self, context: Union[Dict, pd.DataFrame], **kwargs):
-        """Fit all dynamic neighbor generators."""
+        """Fit all dynamic neighbor generators (or use profile overrides when available)."""
         self._dynamic_sensitivities = {}
-        
-        # Progress bar for dynamic generators (A-BB runs)
+
+        if not self.dynamic_generators:
+            return
+
         try:
             from tqdm import tqdm as _tqdm
-            _iter = _tqdm(self.dynamic_generators.items(), total=len(self.dynamic_generators), desc="A-BB (dynamic)")
+            iterator = _tqdm(
+                self.dynamic_generators.items(),
+                total=len(self.dynamic_generators),
+                desc="A-BB (dynamic)",
+            )
         except Exception:
-            _iter = self.dynamic_generators.items()
-        
-        for name, generator in _iter:
+            iterator = self.dynamic_generators.items()
+
+        for name, generator in iterator:
+            profile_value = self._get_profile_value_for_generator(name, generator)
+            canonical = self._canonical_generator_name(name, generator)
+
+            if profile_value is not None:
+                print(f"🚀 Using profile-based {canonical} sensitivity: {profile_value:.4f}")
+                estimator = _ProfileValueEstimator(profile_value)
+                self._dynamic_sensitivities[name] = estimator
+                self._profile_based_generators[name] = profile_value
+                continue
+
+            if self.judge_function is None:
+                print(f"Warning: No judge function available for dynamic generator '{name}'.")
+                self._dynamic_sensitivities[name] = None
+                continue
+
             try:
-                # Create A-BB estimator for this generator
+                rng_state = self.rng.get_state()
+                seed_value = int(rng_state[1][0]) if len(rng_state) > 1 else None
                 abb_estimator = ABBSensitivity(
                     judge_function=self.judge_function,
                     neighbor_generator=generator,
                     num_neighbors=self.num_neighbors,
-                    random_seed=self.rng.get_state()[1][0]  # Get seed from our RNG
+                    random_seed=seed_value,
                 )
-                
-                # Fit and store
+
                 abb_estimator.fit(context, **kwargs)
                 self._dynamic_sensitivities[name] = abb_estimator
-                
-            except Exception as e:
-                print(f"Warning: Dynamic generator '{name}' failed: {e}")
+
+            except Exception as exc:
+                print(f"Warning: Dynamic generator '{name}' failed: {exc}")
                 self._dynamic_sensitivities[name] = None
     
     def estimate(self, score_range: Optional[float] = None) -> float:
@@ -466,3 +564,23 @@ class CombinedABBSensitivity(SensitivityEstimator):
         )
         result["measurement_breakdown"] = self.get_measurement_breakdown()
         return result
+
+
+class _ProfileValueEstimator:
+    """Thin wrapper that exposes the same interface as dynamic estimators."""
+
+    def __init__(self, sensitivity_value: float):
+        self._value = float(sensitivity_value)
+        self._fitted = True
+        self.is_profile_based = True
+
+    def estimate(self, score_range: Optional[float] = None) -> float:
+        return self._value
+
+    def get_diagnostics(self) -> Dict[str, Any]:
+        return {
+            "estimator_type": "ProfileBased",
+            "sensitivity_value": self._value,
+            "source": "sensitivity_profile",
+            "is_dynamic_measurement": False,
+        }

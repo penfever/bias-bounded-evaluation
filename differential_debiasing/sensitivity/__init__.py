@@ -10,7 +10,9 @@ from .schematic_adherence import (
 )
 from .abb_sensitivity import ABBSensitivity
 from .combined_abb_sensitivity import CombinedABBSensitivity
-from .profile_enhanced_abb import ProfileEnhancedABBSensitivity
+
+# Backwards compatibility alias: historical code imported ProfileEnhancedABBSensitivity
+ProfileEnhancedABBSensitivity = CombinedABBSensitivity
 
 __all__ = [
     "SensitivityEstimator",

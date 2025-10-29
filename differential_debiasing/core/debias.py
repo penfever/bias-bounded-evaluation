@@ -22,7 +22,6 @@ from ..sensitivity.psychometric_reliability import PsychometricReliabilitySensit
 from ..sensitivity.schematic_adherence import SchematicAdherenceSensitivity
 from ..sensitivity.abb_sensitivity import ABBSensitivity
 from ..sensitivity.combined_abb_sensitivity import CombinedABBSensitivity
-from ..sensitivity.profile_enhanced_abb import ProfileEnhancedABBSensitivity
 from ..sensitivity.fixed import FixedSensitivityEstimator
 
 
@@ -144,7 +143,7 @@ class DifferentialDebias:
             "schematic_adherence": SchematicAdherenceSensitivity,
             "abb": ABBSensitivity,
             "combined_abb": CombinedABBSensitivity,
-            "profile_enhanced_abb": ProfileEnhancedABBSensitivity,
+            "profile_enhanced_abb": CombinedABBSensitivity,
             "fixed": FixedSensitivityEstimator,
         }
         
