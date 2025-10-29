@@ -7,7 +7,7 @@ import pandas as pd
 from typing import Union, Dict, Any, Optional, List, Callable
 
 from .base import SensitivityEstimator
-from ..neighbors import BaseNeighborGenerator, HammingNeighborGenerator
+from ..core.neighbors import BaseNeighborGenerator, HammingNeighborGenerator
 from ..core.utils import rms_from_differences, compute_abb_constraint_validation
 
 
@@ -71,7 +71,7 @@ class ABBSensitivity(SensitivityEstimator):
             return generator
         
         # Import here to avoid circular imports
-        from ..neighbors import FormattingNeighborGenerator, OrderNeighborGenerator
+        from ..core.neighbors import FormattingNeighborGenerator, OrderNeighborGenerator
         
         generator_map = {
             "hamming": HammingNeighborGenerator,
@@ -234,7 +234,7 @@ class ABBSensitivity(SensitivityEstimator):
         
         # Sample neighbor contexts
         # Check if this is a formatting generator and we have Arena-Hard context
-        from ..neighbors import FormattingNeighborGenerator
+        from ..core.neighbors import FormattingNeighborGenerator
         
         fast_path = False
         if (isinstance(self.neighbor_generator, FormattingNeighborGenerator) and 

@@ -27,7 +27,7 @@ from differential_debiasing.core.debias import DifferentialDebias
 from differential_debiasing.core.config import ConfigManager
 from differential_debiasing.interfaces.oumi_interface import create_oumi_judge_function
 from differential_debiasing.sensitivity.abb_sensitivity import ABBSensitivity
-from differential_debiasing.neighbors import FormattingNeighborGenerator
+from differential_debiasing.core.neighbors import FormattingNeighborGenerator
 from differential_debiasing.interfaces.arena_hard_utils import find_sample_data as find_arena_sample_data
 from differential_debiasing.interfaces import get_judge_config_path
 

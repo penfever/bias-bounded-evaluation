@@ -10,7 +10,12 @@ from .base import SensitivityEstimator
 from .abb_sensitivity import ABBSensitivity
 from .psychometric_reliability import PsychometricReliabilitySensitivity
 from .schematic_adherence import SchematicAdherenceSensitivity
-from ..neighbors import BaseNeighborGenerator, HammingNeighborGenerator, FormattingNeighborGenerator, OrderNeighborGenerator
+from ..core.neighbors import (
+    BaseNeighborGenerator,
+    HammingNeighborGenerator,
+    FormattingNeighborGenerator,
+    OrderNeighborGenerator,
+)
 from ..core.utils import compute_abb_constraint_validation
 from ..core.sensitivity_profiles import (
     SensitivityProfile,
@@ -200,7 +205,7 @@ class CombinedABBSensitivity(SensitivityEstimator):
         
         # Add context-aware generators if available
         try:
-            from ..neighbors.context_aware_neighbors import create_context_aware_generator
+            from ..core.neighbors.context_aware_neighbors import create_context_aware_generator
             context_aware_types = [
                 "question_paraphrasing", "answer_perturbation", 
                 "model_obfuscation", "contextual_variation"
@@ -218,7 +223,7 @@ class CombinedABBSensitivity(SensitivityEstimator):
                 if generator in context_aware_types:
                     if self.judge_function is None:
                         raise ValueError(f"Context-aware generator '{generator}' requires judge_function")
-                    from ..neighbors.context_aware_neighbors import create_context_aware_generator
+                    from ..core.neighbors.context_aware_neighbors import create_context_aware_generator
                     result[generator] = create_context_aware_generator(generator, self.judge_function, **kwargs)
                 elif generator in generator_map:
                     result[generator] = generator_map[generator](**kwargs)
