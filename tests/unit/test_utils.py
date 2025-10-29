@@ -6,9 +6,13 @@ import pytest
 import numpy as np
 import pandas as pd
 from differential_debiasing.core.utils import (
-    normalize_judgments, denormalize_judgments, calculate_noise_parameter,
-    validate_input_array, clip_to_range, check_bias_parameters,
-    estimate_r_squared_from_scores
+    normalize_judgments,
+    denormalize_judgments,
+    validate_input_array,
+    clip_to_range,
+    check_bias_parameters,
+    estimate_r_squared_from_scores,
+    calculate_abb_noise_parameter,
 )
 
 
@@ -81,100 +85,40 @@ class TestNormalizationFunctions:
         assert np.isnan(max_val) or np.isinf(max_val)
 
 
-class TestNoiseCalculation:
-    """Test noise parameter calculation."""
-    
-    def test_calculate_noise_parameter_basic(self):
-        """Test basic noise parameter calculation."""
-        sigma = calculate_noise_parameter(
-            bias_sensitivity=2.0,
-            tau=0.5,
-            delta=0.05,
-            n_samples=100,
-            use_average_case=True
+class TestABBNoiseCalculation:
+    """Test A-BB noise parameter calculation."""
+
+    def test_calculate_abb_noise_parameter_basic(self):
+        """Ensure ABB noise parameter is positive when constraint satisfied."""
+        sigma = calculate_abb_noise_parameter(
+            rms_sensitivity=0.05,
+            tau=1.0,
+            delta=0.1,
+            dimensionality=50,
         )
-        
         assert sigma > 0
         assert isinstance(sigma, float)
-    
-    def test_calculate_noise_parameter_individual_case(self):
-        """Test noise parameter for individual case."""
-        sigma_individual = calculate_noise_parameter(
-            bias_sensitivity=2.0,
-            tau=0.5,
-            delta=0.05,
-            n_samples=100,
-            use_average_case=False
-        )
-        
-        sigma_average = calculate_noise_parameter(
-            bias_sensitivity=2.0,
-            tau=0.5,
-            delta=0.05,
-            n_samples=100,
-            use_average_case=True
-        )
-        
-        # Average case should have less noise
-        assert sigma_individual > sigma_average
-        assert sigma_individual == pytest.approx(sigma_average * np.sqrt(100), rel=1e-6)
-    
-    def test_calculate_noise_parameter_scaling(self):
-        """Test noise parameter scaling with different parameters."""
-        base_sigma = calculate_noise_parameter(
-            bias_sensitivity=1.0,
-            tau=0.5,
-            delta=0.05,
-            n_samples=100,
-            use_average_case=True
-        )
-        
-        # Higher sensitivity -> more noise
-        higher_sens_sigma = calculate_noise_parameter(
-            bias_sensitivity=2.0,
-            tau=0.5,
-            delta=0.05,
-            n_samples=100,
-            use_average_case=True
-        )
-        assert higher_sens_sigma > base_sigma
-        
-        # Lower tau -> more noise (stronger protection)
-        lower_tau_sigma = calculate_noise_parameter(
-            bias_sensitivity=1.0,
-            tau=0.25,
-            delta=0.05,
-            n_samples=100,
-            use_average_case=True
-        )
-        assert lower_tau_sigma > base_sigma
-        
-        # Lower delta -> more noise (higher confidence)
-        lower_delta_sigma = calculate_noise_parameter(
-            bias_sensitivity=1.0,
-            tau=0.5,
-            delta=0.01,
-            n_samples=100,
-            use_average_case=True
-        )
-        assert lower_delta_sigma > base_sigma
-    
-    def test_calculate_noise_parameter_invalid_inputs(self):
-        """Test noise parameter calculation with invalid inputs."""
-        with pytest.raises(ValueError, match="bias_sensitivity must be positive"):
-            calculate_noise_parameter(0, 0.5, 0.05, 100)
-        
+
+    def test_calculate_abb_noise_parameter_high_sensitivity(self):
+        """Verify constraint violation raises ValueError."""
+        with pytest.raises(ValueError, match="A-BB constraint violated"):
+            calculate_abb_noise_parameter(
+                rms_sensitivity=0.6,  # Forces threshold above tau
+                tau=1.0,
+                delta=0.1,
+                dimensionality=10,
+            )
+
+    def test_calculate_abb_noise_parameter_invalid_inputs(self):
+        """Validate input checking mirrors spec."""
+        with pytest.raises(ValueError, match="rms_sensitivity must be non-negative"):
+            calculate_abb_noise_parameter(-0.1, 1.0, 0.1, 10)
         with pytest.raises(ValueError, match="tau must be positive"):
-            calculate_noise_parameter(1.0, 0, 0.05, 100)
-        
+            calculate_abb_noise_parameter(0.1, 0.0, 0.1, 10)
         with pytest.raises(ValueError, match="delta must be in \\(0, 1\\)"):
-            calculate_noise_parameter(1.0, 0.5, 0, 100)
-        
-        with pytest.raises(ValueError, match="delta must be in \\(0, 1\\)"):
-            calculate_noise_parameter(1.0, 0.5, 1, 100)
-        
-        with pytest.raises(ValueError, match="n_samples must be positive"):
-            calculate_noise_parameter(1.0, 0.5, 0.05, 0)
+            calculate_abb_noise_parameter(0.1, 1.0, 0.0, 10)
+        with pytest.raises(ValueError, match="dimensionality must be positive"):
+            calculate_abb_noise_parameter(0.1, 1.0, 0.1, 0)
 
 
 class TestValidationFunctions:

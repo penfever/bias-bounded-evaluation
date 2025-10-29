@@ -14,7 +14,7 @@ from typing import Union, Dict, Any, Optional, List, Tuple, Callable
 import warnings
 from dataclasses import dataclass
 
-from ..core.utils import calculate_noise_parameter, calculate_abb_noise_parameter
+from ..core.utils import calculate_abb_noise_parameter
 
 
 @dataclass
@@ -117,24 +117,18 @@ class BiaseBoundedCalibrationCreator:
         # Use provided sensitivity or config default
         sensitivity = bias_sensitivity or self.config.sensitivity_estimate
         
-        # Calculate noise parameter
-        if self.config.dimensionality is not None:
-            # Use A-BB mechanism
+        # Calculate noise parameter using the A-BB mechanism (fallback dimensionality = number of scores)
+        dimensionality = self.config.dimensionality or len(scores)
+        try:
             noise_std = calculate_abb_noise_parameter(
                 rms_sensitivity=sensitivity,
                 tau=self.config.tau,
                 delta=self.config.delta,
-                dimensionality=self.config.dimensionality
+                dimensionality=dimensionality,
             )
-        else:
-            # Use standard mechanism
-            noise_std = calculate_noise_parameter(
-                bias_sensitivity=sensitivity,
-                tau=self.config.tau,
-                delta=self.config.delta,
-                use_average_case=self.config.use_average_case,
-                n_samples=len(scores)
-            )
+        except ValueError as exc:
+            warnings.warn(f"Failed to compute A-BB noise parameter: {exc}. Using zero noise instead.")
+            noise_std = 0.0
         
         # Apply noise-to-signal ratio limit
         signal_std = np.std(scores)

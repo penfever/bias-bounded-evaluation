@@ -24,7 +24,7 @@ except ImportError:
 from .conformal_sensitivity import ConformalSensitivityEstimator
 from .multi_judge_conformal import MultiJudgeConformalPredictor
 from .bias_bounded_calibration import BiaseBoundedCalibrationCreator, CalibrationSetConfig
-from ..core.utils import calculate_noise_parameter, calculate_abb_noise_parameter
+from ..core.utils import calculate_abb_noise_parameter
 from .base import SensitivityEstimator
 
 
@@ -284,13 +284,16 @@ class ConformedBiasBoundedPredictor(SensitivityEstimator):
         for adaptation_factor in adaptation_factors:
             adapted_sensitivity = base_sensitivity * adaptation_factor
             
-            noise_std = calculate_noise_parameter(
-                bias_sensitivity=adapted_sensitivity,
-                tau=self.config.bbe_tau,
-                delta=self.config.bbe_delta,
-                use_average_case=self.config.use_average_case,
-                n_samples=len(self._uncertainty_scores)
-            )
+            try:
+                noise_std = calculate_abb_noise_parameter(
+                    rms_sensitivity=adapted_sensitivity,
+                    tau=self.config.bbe_tau,
+                    delta=self.config.bbe_delta,
+                    dimensionality=len(self._uncertainty_scores),
+                )
+            except ValueError as exc:
+                warnings.warn(f"Adaptive noise computation failed: {exc}. Using zero noise for this component.")
+                noise_std = 0.0
             
             adaptive_noise_stds.append(noise_std)
         
@@ -521,13 +524,16 @@ class ConformedBiasBoundedPredictor(SensitivityEstimator):
         if baseline_method == "fixed_noise":
             # Fixed noise BBE
             base_sensitivity = self._adaptive_noise_parameters['base_sensitivity']
-            fixed_noise_std = calculate_noise_parameter(
-                bias_sensitivity=base_sensitivity,
-                tau=self.config.bbe_tau,
-                delta=self.config.bbe_delta,
-                use_average_case=self.config.use_average_case,
-                n_samples=len(self._uncertainty_scores)
-            )
+            try:
+                fixed_noise_std = calculate_abb_noise_parameter(
+                    rms_sensitivity=base_sensitivity,
+                    tau=self.config.bbe_tau,
+                    delta=self.config.bbe_delta,
+                    dimensionality=len(self._uncertainty_scores),
+                )
+            except ValueError as exc:
+                warnings.warn(f"Fixed-noise baseline failed to compute ABB noise: {exc}. Using zero noise baseline.")
+                fixed_noise_std = 0.0
             
             baseline_noise_stds = np.full(len(self._uncertainty_scores), fixed_noise_std)
             

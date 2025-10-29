@@ -5,7 +5,6 @@ from .config import DebiasConfig, ConfigManager
 from .utils import (
     normalize_judgments, 
     denormalize_judgments, 
-    calculate_noise_parameter,
     calculate_abb_noise_parameter,
     rms_from_differences,
     context_adjusted_rms,
@@ -20,7 +19,6 @@ __all__ = [
     'ConfigManager',
     'normalize_judgments',
     'denormalize_judgments',
-    'calculate_noise_parameter',
     'calculate_abb_noise_parameter',
     'rms_from_differences',
     'context_adjusted_rms',

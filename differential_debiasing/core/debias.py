@@ -9,7 +9,6 @@ from typing import Union, Optional, Dict, Any, List
 from .utils import (
     normalize_judgments,
     denormalize_judgments,
-    calculate_noise_parameter,
     calculate_abb_noise_parameter,
     validate_input_array,
     clip_to_range,
@@ -321,39 +320,20 @@ class DifferentialDebias:
         # Normalize judgments to [0, 1]
         normalized_judgments, _, _ = normalize_judgments(judgments, score_min, score_max)
         
-        # Calculate noise parameter - use A-BB formula if ABB estimator
-        if isinstance(self.sensitivity_estimator, (ABBSensitivity, CombinedABBSensitivity, FixedSensitivityEstimator)):
-            # A-BB mechanism
-            # Assume complete independence of dimensions (factors) unless dimensionality specified
-            # if self.dimensionality is None:
-            #     self.dimensionality = 1
-            # Condition noise on the size of the judgment vector
-            if self.dimensionality is None:
-                self.dimensionality = len(judgments)
-            
-            sigma = calculate_abb_noise_parameter(
-                rms_sensitivity=(self._bias_sensitivity / (score_max - score_min)) * float(self._effective_alpha or 1.0),
-                tau=self.tau,
-                delta=self.delta,
-                dimensionality=self.dimensionality
-            )
-            
-            # Generate multivariate Gaussian noise
-            # Since covariance is diagonal (σ² I), sample i.i.d. normals for efficiency
-            noise = self.rng.normal(loc=0.0, scale=sigma, size=len(judgments))
-        else:
-            # Original mechanism
-            n_samples = len(judgments)
-            sigma = calculate_noise_parameter(
-                bias_sensitivity=self._bias_sensitivity / (score_max - score_min),  # Normalize sensitivity
-                tau=self.tau,
-                delta=self.delta,
-                n_samples=n_samples,
-                use_average_case=self.use_average_case
-            )
-            
-            # Generate and add noise
-            noise = self.rng.normal(0, sigma, len(judgments))
+        # Calculate noise parameter using the A-BB formulation; default dimensionality falls back to sample size
+        if self.dimensionality is None:
+            self.dimensionality = len(judgments)
+
+        rms_sensitivity = (self._bias_sensitivity / (score_max - score_min)) * float(self._effective_alpha or 1.0)
+        sigma = calculate_abb_noise_parameter(
+            rms_sensitivity=rms_sensitivity,
+            tau=self.tau,
+            delta=self.delta,
+            dimensionality=self.dimensionality,
+        )
+
+        # Generate multivariate Gaussian noise (diagonal covariance -> i.i.d. normals)
+        noise = self.rng.normal(loc=0.0, scale=sigma, size=len(judgments))
         # Apply shrinkage mapping in normalized space before adding noise (per Proposition)
         alpha = float(self._effective_alpha or 1.0)
         base_normalized = normalized_judgments
@@ -434,25 +414,14 @@ class DifferentialDebias:
         if not self._fitted:
             raise ValueError("Must call fit() before getting bias bounds")
         
-        # Calculate sigma for this sample size - use A-BB formula if ABB estimator
-        if isinstance(self.sensitivity_estimator, (ABBSensitivity, CombinedABBSensitivity, FixedSensitivityEstimator)):
-            # A-BB mechanism
-            dimensionality = self.dimensionality if self.dimensionality is not None else n_samples
-            sigma = calculate_abb_noise_parameter(
-                rms_sensitivity=(self._bias_sensitivity / self._original_range) * float(self._effective_alpha or 1.0),
-                tau=self.tau,
-                delta=self.delta,
-                dimensionality=dimensionality
-            )
-        else:
-            # Original mechanism
-            sigma = calculate_noise_parameter(
-                bias_sensitivity=self._bias_sensitivity / self._original_range,
-                tau=self.tau,
-                delta=self.delta,
-                n_samples=n_samples,
-                use_average_case=self.use_average_case
-            )
+        # Calculate sigma for this sample size using the A-BB formulation
+        dimensionality = self.dimensionality if self.dimensionality is not None else n_samples
+        sigma = calculate_abb_noise_parameter(
+            rms_sensitivity=(self._bias_sensitivity / self._original_range) * float(self._effective_alpha or 1.0),
+            tau=self.tau,
+            delta=self.delta,
+            dimensionality=dimensionality,
+        )
         
         # Convert back to original scale
         sigma_original_scale = sigma * self._original_range

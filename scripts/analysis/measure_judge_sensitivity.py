@@ -31,10 +31,6 @@ from differential_debiasing.neighbors import FormattingNeighborGenerator
 from differential_debiasing.interfaces.arena_hard_utils import find_sample_data as find_arena_sample_data
 from differential_debiasing.interfaces import get_judge_config_path
 
-
-# (find_sample_data moved to differential_debiasing.interfaces.arena_hard_utils)
-
-
 def measure_formatting_sensitivity(judge_name: str,
                                  sample_data: pd.DataFrame,
                                  num_neighbors: int = 40,

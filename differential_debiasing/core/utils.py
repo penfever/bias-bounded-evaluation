@@ -101,50 +101,6 @@ def denormalize_judgments(normalized_judgments: np.ndarray,
     return normalized_judgments * (score_max - score_min) + score_min
 
 
-def calculate_noise_parameter(bias_sensitivity: float,
-                            tau: float,
-                            delta: float,
-                            n_samples: int,
-                            use_average_case: bool = True) -> float:
-    """
-    Calculate the noise parameter sigma for bias-bounded mechanism (original version).
-    
-    Parameters:
-    -----------
-    bias_sensitivity : float
-        Bias sensitivity (Δ_B f) in same units as judgments
-    tau : float
-        Bias protection parameter
-    delta : float
-        Failure probability
-    n_samples : int
-        Number of samples in dataset
-    use_average_case : bool
-        Whether to use average-case bounds (recommended for datasets)
-        
-    Returns:
-    --------
-    float : Standard deviation for Gaussian noise
-    """
-    if bias_sensitivity <= 0:
-        raise ValueError("bias_sensitivity must be positive")
-    if tau <= 0:
-        raise ValueError("tau must be positive")
-    if not 0 < delta < 1:
-        raise ValueError("delta must be in (0, 1)")
-    if n_samples <= 0:
-        raise ValueError("n_samples must be positive")
-    
-    # Base sigma calculation
-    sigma = (bias_sensitivity * np.sqrt(2 * np.log(1.25 / delta))) / tau
-    
-    # Apply average-case optimization
-    if use_average_case and n_samples > 1:
-        sigma = sigma / np.sqrt(n_samples)
-    
-    return sigma
-
-
 def calculate_abb_noise_parameter(rms_sensitivity: float,
                                 tau: float,
                                 delta: float,
