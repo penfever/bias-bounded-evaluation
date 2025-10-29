@@ -18,15 +18,9 @@ from .core.config import DebiasConfig, ConfigManager
 # Sensitivity estimators
 from .sensitivity import (
     SensitivityEstimator,
-    FactorAnalysisSensitivity,
-    EmpiricalSensitivity, 
-    DomainSpecificSensitivity,
-    CombinedSensitivity,
     ABBSensitivity,
     CombinedABBSensitivity,
     ProfileEnhancedABBSensitivity,
-    ConformalSensitivityEstimator,
-    ConformedBiasBoundedPredictor,
     PsychometricReliabilitySensitivity,
     SchematicAdherenceSensitivity
 )
@@ -49,15 +43,9 @@ __all__ = [
     
     # Sensitivity estimators
     "SensitivityEstimator",
-    "FactorAnalysisSensitivity",
-    "EmpiricalSensitivity", 
-    "DomainSpecificSensitivity",
-    "CombinedSensitivity",
     "ABBSensitivity", 
     "CombinedABBSensitivity",
     "ProfileEnhancedABBSensitivity",
-    "ConformalSensitivityEstimator",
-    "ConformedBiasBoundedPredictor",
     "PsychometricReliabilitySensitivity",
     "SchematicAdherenceSensitivity",
     

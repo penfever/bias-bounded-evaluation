@@ -18,18 +18,12 @@ from .utils import (
 )
 from .sensitivity_profiles import SensitivityProfile, SensitivityProfileManager, get_formatting_sensitivity
 from ..sensitivity.base import SensitivityEstimator
-from ..sensitivity.factor_analysis import FactorAnalysisSensitivity
-from ..sensitivity.empirical import EmpiricalSensitivity
-from ..sensitivity.domain_specific import DomainSpecificSensitivity
 from ..sensitivity.psychometric_reliability import PsychometricReliabilitySensitivity
 from ..sensitivity.schematic_adherence import SchematicAdherenceSensitivity
-from ..sensitivity.combined import CombinedSensitivity
 from ..sensitivity.abb_sensitivity import ABBSensitivity
 from ..sensitivity.combined_abb_sensitivity import CombinedABBSensitivity
 from ..sensitivity.profile_enhanced_abb import ProfileEnhancedABBSensitivity
-from ..sensitivity.conformal_sensitivity import ConformalSensitivityEstimator
 from ..sensitivity.fixed import FixedSensitivityEstimator
-from ..sensitivity.conformal_bbe_unified import ConformedBiasBoundedPredictor
 
 
 class DifferentialDebias:
@@ -44,7 +38,7 @@ class DifferentialDebias:
     def __init__(self, 
                  tau: float = 0.5,
                  delta: float = 0.05,
-                 sensitivity_estimator: Optional[Union[str, SensitivityEstimator]] = "factor_analysis",
+                 sensitivity_estimator: Optional[Union[str, SensitivityEstimator]] = "fixed",
                  sensitivity_profile: Optional[Union[SensitivityProfile, str, Dict[str, float]]] = None,
                  profile_dir: Optional[str] = None,
                  use_average_case: bool = True,
@@ -66,15 +60,13 @@ class DifferentialDebias:
         delta : float
             Failure probability. Probability that bias protection fails.
         sensitivity_estimator : str or SensitivityEstimator
-            Method to estimate bias sensitivity. Options:
-            - "factor_analysis": Use R² based estimation (default)
-            - "empirical": Direct measurement from bias triggers  
-            - "domain_specific": Fixed bounds based on domain knowledge
+            Method to estimate bias sensitivity. Supported options include:
             - "psychometric_reliability": Psychometric reliability analysis (Cronbach's α + CLR + HTMT)
             - "schematic_adherence": Schematic adherence analysis (linear/polynomial regression)
-            - "combined": Combined psychometric reliability + schematic adherence
             - "abb": A-BB mechanism with neighbor sampling and RMS sensitivity
             - "combined_abb": Combined static + dynamic A-BB measurements
+            - "profile_enhanced_abb": Combined A-BB with cached profile values
+            - "fixed": Use a fixed, externally provided sensitivity value (default)
             - Custom SensitivityEstimator instance
         sensitivity_profile : SensitivityProfile, str, or Dict[str, float], optional
             Pre-computed sensitivity values to use instead of/alongside estimator.
@@ -125,6 +117,9 @@ class DifferentialDebias:
         if self.sensitivity_profile and sensitivity_estimator in ['profile_enhanced_abb', 'combined_abb']:
             estimator_kwargs['sensitivity_profile'] = self.sensitivity_profile
         
+        if isinstance(sensitivity_estimator, str) and sensitivity_estimator == "fixed":
+            estimator_kwargs.setdefault("fixed_sensitivity_value", 1.0)
+        
         self.sensitivity_estimator = self._create_sensitivity_estimator(
             sensitivity_estimator, **estimator_kwargs
         )
@@ -145,17 +140,11 @@ class DifferentialDebias:
             return estimator
         
         estimator_map = {
-            "factor_analysis": FactorAnalysisSensitivity,
-            "empirical": EmpiricalSensitivity, 
-            "domain_specific": DomainSpecificSensitivity,
             "psychometric_reliability": PsychometricReliabilitySensitivity,
             "schematic_adherence": SchematicAdherenceSensitivity,
-            "combined": CombinedSensitivity,
             "abb": ABBSensitivity,
             "combined_abb": CombinedABBSensitivity,
             "profile_enhanced_abb": ProfileEnhancedABBSensitivity,
-            "conformal_sensitivity": ConformalSensitivityEstimator,
-            "cp_bbe_unified": ConformedBiasBoundedPredictor,
             "fixed": FixedSensitivityEstimator,
         }
         

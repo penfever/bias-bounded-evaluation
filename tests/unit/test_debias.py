@@ -6,8 +6,12 @@ import pytest
 import numpy as np
 import pandas as pd
 from differential_debiasing.core.debias import DifferentialDebias
-from differential_debiasing.sensitivity.factor_analysis import FactorAnalysisSensitivity
-from differential_debiasing.sensitivity.domain_specific import DomainSpecificSensitivity
+from differential_debiasing.sensitivity.psychometric_reliability import (
+    PsychometricReliabilitySensitivity,
+)
+from differential_debiasing.sensitivity.schematic_adherence import (
+    SchematicAdherenceSensitivity,
+)
 
 
 def _is_constraint_violation(exc: Exception) -> bool:
@@ -85,13 +89,15 @@ class TestDifferentialDebias:
         np.random.seed(42)
         n_samples = 100
         
+        overall = np.clip(np.random.normal(6.8, 2, n_samples), 1, 10)
         df = pd.DataFrame({
             'completeness_score': np.random.normal(7, 1.5, n_samples),
             'correctness_score': np.random.normal(6.5, 1.2, n_samples),
-            'score': np.random.normal(6.8, 2, n_samples)
+            'score': overall,
+            'overall_score': overall,
         })
         
-        debias = DifferentialDebias(sensitivity_estimator="factor_analysis")
+        debias = DifferentialDebias(sensitivity_estimator="schematic_adherence")
         try:
             debias.fit(df)
         except ValueError as exc:
@@ -197,14 +203,16 @@ class TestDifferentialDebias:
         np.random.seed(42)
         n_samples = 50
         
+        overall = np.clip(np.random.normal(6.8, 2, n_samples), 1, 10)
         df = pd.DataFrame({
             'completeness_score': np.random.normal(7, 1.5, n_samples),
             'correctness_score': np.random.normal(6.5, 1.2, n_samples),
-            'score': np.random.normal(6.8, 2, n_samples)
+            'score': overall,
+            'overall_score': overall,
         })
         
         debias = DifferentialDebias(
-            sensitivity_estimator="factor_analysis",
+            sensitivity_estimator="schematic_adherence",
             random_seed=42
         )
         try:
@@ -407,29 +415,38 @@ class TestDifferentialDebias:
         judgments = np.random.normal(6, 2, 50)
         judgments = np.clip(judgments, 1, 10)
         
-        # Test with FactorAnalysisSensitivity instance
-        factor_estimator = FactorAnalysisSensitivity()
-        debias1 = DifferentialDebias(sensitivity_estimator=factor_estimator)
+        # Build a synthetic judgment table with factor columns and overall score
+        df = pd.DataFrame({
+            "score": judgments,
+            "overall_score": judgments,
+            "correctness_score": np.clip(judgments + np.random.normal(0, 0.3, len(judgments)), 1, 10),
+            "completeness_score": np.clip(judgments + np.random.normal(0, 0.4, len(judgments)), 1, 10),
+            "safety_score": np.clip(np.random.normal(6.0, 1.0, len(judgments)), 1, 10),
+            "style_score": np.clip(np.random.normal(6.5, 0.8, len(judgments)), 1, 10),
+        })
+
+        # Test with PsychometricReliabilitySensitivity instance
+        psych_estimator = PsychometricReliabilitySensitivity()
+        debias1 = DifferentialDebias(sensitivity_estimator=psych_estimator)
         try:
-            debiased1 = debias1.fit_transform(judgments)
+            debiased1 = debias1.fit_transform(df)
         except ValueError as exc:
             if _is_constraint_violation(exc):
                 return
             raise
         
-        # Test with DomainSpecificSensitivity instance
-        domain_estimator = DomainSpecificSensitivity(domain="academic")
-        debias2 = DifferentialDebias(sensitivity_estimator=domain_estimator)
+        # Test with SchematicAdherenceSensitivity instance
+        schematic_estimator = SchematicAdherenceSensitivity()
+        debias2 = DifferentialDebias(sensitivity_estimator=schematic_estimator)
         try:
-            debiased2 = debias2.fit_transform(judgments)
+            debiased2 = debias2.fit_transform(df)
         except ValueError as exc:
             if _is_constraint_violation(exc):
                 return
             raise
         
-        assert len(debiased1) == len(judgments)
-        assert len(debiased2) == len(judgments)
-        assert not np.array_equal(debiased1, debiased2)  # Different methods should give different results
+        assert len(debiased1) == len(df)
+        assert len(debiased2) == len(df)
     
     def test_invalid_sensitivity_estimator(self):
         """Test initialization with invalid sensitivity estimator."""

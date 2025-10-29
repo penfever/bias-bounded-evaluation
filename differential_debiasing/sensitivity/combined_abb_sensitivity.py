@@ -8,12 +8,8 @@ from typing import Union, Dict, Any, Optional, List, Callable
 
 from .base import SensitivityEstimator
 from .abb_sensitivity import ABBSensitivity
-from .factor_analysis import FactorAnalysisSensitivity
-from .empirical import EmpiricalSensitivity
-from .domain_specific import DomainSpecificSensitivity
 from .psychometric_reliability import PsychometricReliabilitySensitivity
 from .schematic_adherence import SchematicAdherenceSensitivity
-from .combined import CombinedSensitivity
 from ..neighbors import BaseNeighborGenerator, HammingNeighborGenerator, FormattingNeighborGenerator, OrderNeighborGenerator
 from ..core.utils import compute_abb_constraint_validation
 
@@ -47,7 +43,7 @@ class CombinedABBSensitivity(SensitivityEstimator):
         Parameters:
         -----------
         static_estimators : List[str or SensitivityEstimator], optional
-            Static bias measurement methods. Default: ["psychometric_reliability", "factor_analysis"]
+            Static bias measurement methods. Default: ["psychometric_reliability", "schematic_adherence"]
         dynamic_generators : List[str or BaseNeighborGenerator], optional  
             Dynamic neighbor generators for A-BB. Default: ["hamming", "formatting"]
         combination_strategy : str
@@ -71,7 +67,7 @@ class CombinedABBSensitivity(SensitivityEstimator):
         
         # Default static estimators
         if static_estimators is None:
-            static_estimators = ["psychometric_reliability", "factor_analysis"]
+            static_estimators = ["psychometric_reliability", "schematic_adherence"]
         
         # Default dynamic generators  
         if dynamic_generators is None:
@@ -99,12 +95,8 @@ class CombinedABBSensitivity(SensitivityEstimator):
     def _create_static_estimators(self, estimators: List[Union[str, SensitivityEstimator]], **kwargs) -> Dict[str, SensitivityEstimator]:
         """Create static sensitivity estimators from list."""
         static_map = {
-            "factor_analysis": FactorAnalysisSensitivity,
-            "empirical": EmpiricalSensitivity,
-            "domain_specific": DomainSpecificSensitivity,
             "psychometric_reliability": PsychometricReliabilitySensitivity,
             "schematic_adherence": SchematicAdherenceSensitivity,
-            "combined": CombinedSensitivity,
         }
         
         result = {}

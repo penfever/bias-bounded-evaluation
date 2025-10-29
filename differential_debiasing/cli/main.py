@@ -103,14 +103,10 @@ def main():
                        help='Failure probability (0 < delta < 1)')
     
     # Sensitivity estimation
-    parser.add_argument('--sensitivity-method', choices=['factor_analysis', 'empirical', 'domain_specific'],
-                       default='factor_analysis', help='Bias sensitivity estimation method')
-    parser.add_argument('--domain', default='general',
-                       help='Domain for domain_specific method')
-    parser.add_argument('--scale-type', default='1-10',
-                       help='Score scale type (1-10, 0-100, 0-1, 1-5)')
+    parser.add_argument('--sensitivity-method', choices=['schematic_adherence', 'psychometric_reliability', 'fixed'],
+                       default='schematic_adherence', help='Bias sensitivity estimation method')
     parser.add_argument('--sensitivity-value', type=float,
-                       help='Explicit sensitivity value (overrides estimation)')
+                       help='Explicit sensitivity value (used when method is fixed)')
     
     # Data processing
     parser.add_argument('--score-field', default='score',
@@ -118,9 +114,9 @@ def main():
     parser.add_argument('--debiased-field', default='debiased_score',
                        help='Field name for debiased scores')
     parser.add_argument('--factor-columns', nargs='+',
-                       help='Factor score column names (for factor_analysis method)')
-    parser.add_argument('--target-column', default='score',
-                       help='Target score column name (for factor_analysis method)')
+                       help='Factor score column names (for schematic_adherence / psychometric methods)')
+    parser.add_argument('--target-column', default='overall_score',
+                       help='Target score column name (for schematic_adherence method)')
     
     # Options
     parser.add_argument('--no-average-case', action='store_true',
@@ -158,15 +154,12 @@ def main():
         
         # Set up sensitivity estimator kwargs
         estimator_kwargs = {}
-        if args.sensitivity_method == 'factor_analysis':
+        if args.sensitivity_method in ('schematic_adherence', 'psychometric_reliability'):
             if args.factor_columns:
                 estimator_kwargs['factor_columns'] = args.factor_columns
             estimator_kwargs['target_column'] = args.target_column
-        elif args.sensitivity_method == 'domain_specific':
-            estimator_kwargs['domain'] = args.domain
-            estimator_kwargs['scale_type'] = args.scale_type
-            if args.sensitivity_value:
-                estimator_kwargs['sensitivity_value'] = args.sensitivity_value
+        if args.sensitivity_method == 'fixed' and args.sensitivity_value is not None:
+            estimator_kwargs['fixed_sensitivity_value'] = args.sensitivity_value
         
         # Create debiasing mechanism
         if args.verbose:
@@ -185,9 +178,9 @@ def main():
         if args.verbose:
             print("Fitting debiasing mechanism")
         
-        # For factor analysis, we need the full DataFrame
-        if args.sensitivity_method == 'factor_analysis' and len(data) > 0:
-            # Convert to DataFrame for factor analysis
+        # For static estimators that rely on factor columns, we need the full DataFrame
+        if args.sensitivity_method in ('schematic_adherence', 'psychometric_reliability') and len(data) > 0:
+            # Convert to DataFrame so the estimator can access factor columns
             df = pd.DataFrame(data)
             debias.fit(df)
             debiased_scores = debias.transform(scores)

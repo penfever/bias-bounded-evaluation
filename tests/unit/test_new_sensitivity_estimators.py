@@ -1,8 +1,7 @@
 """
-Tests for the new bias sensitivity estimators:
+Tests for the primary static bias sensitivity estimators:
 - PsychometricReliabilitySensitivity
-- SchematicAdherenceSensitivity  
-- CombinedSensitivity
+- SchematicAdherenceSensitivity
 """
 
 import pytest
@@ -16,7 +15,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from differential_debiasing.sensitivity.psychometric_reliability import PsychometricReliabilitySensitivity
 from differential_debiasing.sensitivity.schematic_adherence import SchematicAdherenceSensitivity
-from differential_debiasing.sensitivity.combined import CombinedSensitivity
 from differential_debiasing.core.debias import DifferentialDebias
 
 
@@ -250,169 +248,6 @@ class TestSchematicAdherenceSensitivity:
         assert "quality_indicators" in diagnostics
 
 
-class TestCombinedSensitivity:
-    """Test cases for CombinedSensitivity."""
-    
-    @pytest.fixture
-    def comprehensive_judgment_data(self):
-        """Create comprehensive judgment data for combined analysis."""
-        np.random.seed(42)
-        n_samples = 100
-        
-        # Generate base quality with some structure
-        base_quality = np.random.normal(7, 1.5, n_samples)
-        
-        # Factor scores with varying correlations
-        factor_scores = {
-            'correctness_score': np.clip(base_quality + np.random.normal(0, 0.5, n_samples), 1, 10),
-            'completeness_score': np.clip(base_quality + np.random.normal(0, 0.8, n_samples), 1, 10),
-            'safety_score': np.clip(base_quality + np.random.normal(0, 0.3, n_samples), 1, 10),
-            'conciseness_score': np.clip(np.random.normal(6, 1.2, n_samples), 1, 10),
-            'style_score': np.clip(base_quality + np.random.normal(0, 0.6, n_samples), 1, 10),
-        }
-        
-        # Overall score derived from factors with some bias
-        overall = (0.3 * factor_scores['correctness_score'] + 
-                  0.25 * factor_scores['completeness_score'] +
-                  0.2 * factor_scores['safety_score'] +
-                  0.1 * factor_scores['conciseness_score'] +
-                  0.15 * factor_scores['style_score'] +
-                  np.random.normal(0, 1, n_samples))
-        
-        factor_scores['overall_score'] = np.clip(overall, 1, 10)
-        
-        return pd.DataFrame(factor_scores)
-    
-    def test_initialization(self):
-        """Test proper initialization of CombinedSensitivity."""
-        estimator = CombinedSensitivity()
-        assert estimator.alpha == 0.5  # Equal weighting by default
-        assert estimator.gamma == 1.0
-        assert estimator.target_column == 'overall_score'
-        assert not estimator._fitted
-    
-    def test_custom_weighting(self):
-        """Test initialization with custom alpha weighting."""
-        estimator = CombinedSensitivity(alpha=0.8, gamma=1.2)
-        assert estimator.alpha == 0.8
-        assert estimator.gamma == 1.2
-    
-    def test_invalid_alpha(self):
-        """Test that invalid alpha values raise ValueError."""
-        with pytest.raises(ValueError, match="alpha must be between 0 and 1"):
-            CombinedSensitivity(alpha=1.5)
-        
-        with pytest.raises(ValueError, match="alpha must be between 0 and 1"):
-            CombinedSensitivity(alpha=-0.1)
-    
-    def test_invalid_gamma(self):
-        """Test that invalid gamma values raise ValueError."""
-        with pytest.raises(ValueError, match="gamma must be positive"):
-            CombinedSensitivity(gamma=0)
-        
-        with pytest.raises(ValueError, match="gamma must be positive"):
-            CombinedSensitivity(gamma=-1.0)
-    
-    def test_fit_workflow(self, comprehensive_judgment_data):
-        """Test fitting workflow."""
-        estimator = CombinedSensitivity()
-        estimator.fit(comprehensive_judgment_data)
-        
-        assert estimator._fitted
-        assert estimator._component_diagnostics['psychometric_fitted'] or \
-               estimator._component_diagnostics['schematic_fitted']
-    
-    def test_estimate_workflow(self, comprehensive_judgment_data):
-        """Test complete workflow from fit to estimate."""
-        estimator = CombinedSensitivity()
-        estimator.fit(comprehensive_judgment_data)
-        sensitivity = estimator.estimate(score_range=9.0)
-        
-        assert isinstance(sensitivity, float)
-        assert sensitivity > 0
-        assert sensitivity <= 9.0
-    
-    def test_component_sensitivities(self, comprehensive_judgment_data):
-        """Test component sensitivity calculations."""
-        estimator = CombinedSensitivity()
-        estimator.fit(comprehensive_judgment_data)
-        estimator.estimate(score_range=9.0)
-        
-        components = estimator.get_component_sensitivities()
-        
-        assert "psychometric_sensitivity" in components
-        assert "schematic_sensitivity" in components
-        assert "combined_sensitivity" in components
-        
-        # Check that sensitivities are reasonable
-        if components["psychometric_sensitivity"] is not None:
-            assert components["psychometric_sensitivity"] > 0
-        if components["schematic_sensitivity"] is not None:
-            assert components["schematic_sensitivity"] > 0
-        assert components["combined_sensitivity"] > 0
-    
-    def test_alpha_update(self, comprehensive_judgment_data):
-        """Test updating alpha parameter."""
-        estimator = CombinedSensitivity(alpha=0.5)
-        estimator.fit(comprehensive_judgment_data)
-        original_sensitivity = estimator.estimate(score_range=9.0)
-        
-        # Update alpha and check that sensitivity changes
-        estimator.set_alpha(0.8)
-        assert estimator.get_alpha() == 0.8
-        
-        new_sensitivity = estimator.estimate(score_range=9.0)
-        # Sensitivity should change (unless components are very similar)
-        # We allow small differences due to numerical precision
-        assert abs(original_sensitivity - new_sensitivity) >= 0 or True  # Always pass for stability
-    
-    def test_gamma_update(self, comprehensive_judgment_data):
-        """Test updating gamma parameter."""
-        estimator = CombinedSensitivity(gamma=1.0)
-        estimator.fit(comprehensive_judgment_data)
-        original_sensitivity = estimator.estimate(score_range=9.0)
-        
-        # Update gamma - should scale the sensitivity
-        estimator.set_gamma(1.5)
-        assert estimator.get_gamma() == 1.5
-        
-        # The sensitivity should be approximately scaled by 1.5
-        expected_sensitivity = original_sensitivity * 1.5
-        current_sensitivity = estimator._combined_sensitivity
-        assert abs(current_sensitivity - expected_sensitivity) < 0.01
-    
-    def test_component_estimator_access(self, comprehensive_judgment_data):
-        """Test accessing component estimators."""
-        estimator = CombinedSensitivity()
-        estimator.fit(comprehensive_judgment_data)
-        
-        psychometric_est = estimator.get_psychometric_estimator()
-        schematic_est = estimator.get_schematic_estimator()
-        
-        assert isinstance(psychometric_est, PsychometricReliabilitySensitivity)
-        assert isinstance(schematic_est, SchematicAdherenceSensitivity)
-    
-    def test_comprehensive_diagnostics(self, comprehensive_judgment_data):
-        """Test comprehensive diagnostic information."""
-        estimator = CombinedSensitivity()
-        estimator.fit(comprehensive_judgment_data)
-        estimator.estimate(score_range=9.0)
-        
-        diagnostics = estimator.get_diagnostics()
-        
-        assert "method_details" in diagnostics
-        assert "combination_parameters" in diagnostics
-        assert "component_sensitivities" in diagnostics
-        assert "component_status" in diagnostics
-        assert "quality_indicators" in diagnostics
-        
-        # Check combination parameters
-        combo_params = diagnostics["combination_parameters"]
-        assert "alpha" in combo_params
-        assert "gamma" in combo_params
-        assert "psychometric_weight" in combo_params
-        assert "schematic_weight" in combo_params
-
 
 class TestIntegrationWithDifferentialDebias:
     """Test integration of new sensitivity estimators with DifferentialDebias."""
@@ -500,50 +335,12 @@ class TestIntegrationWithDifferentialDebias:
         assert len(debiased_scores) == len(scores)
         assert isinstance(debiased_scores, np.ndarray)
     
-    def test_combined_integration(self, sample_data_for_integration):
-        """Test CombinedSensitivity integration with DifferentialDebias."""
-        debiaser = DifferentialDebias(
-            tau=0.4,
-            delta=0.05,
-            sensitivity_estimator="combined"
-        )
-        
-        try:
-            debiaser.fit(sample_data_for_integration)
-        except ValueError as exc:
-            if _is_constraint_violation(exc):
-                return
-            raise
-        
-        # Test debiasing
-        scores = sample_data_for_integration['overall_score'].values
-        try:
-            debiased_scores = debiaser.transform(scores)
-        except ValueError as exc:
-            if _is_constraint_violation(exc):
-                return
-            raise
-
-        assert len(debiased_scores) == len(scores)
-        assert isinstance(debiased_scores, np.ndarray)
-
-        # Test bias bounds
-        try:
-            bias_bounds = debiaser.get_bias_bounds(len(scores))
-        except ValueError as exc:
-            if _is_constraint_violation(exc):
-                return
-            raise
-        assert 'tau' in bias_bounds
-        assert 'delta' in bias_bounds
-        assert 'bias_sensitivity' in bias_bounds
-    
     def test_fit_transform_workflow(self, sample_data_for_integration):
         """Test fit_transform workflow with new estimators."""
         debiaser = DifferentialDebias(
             tau=0.5,
             delta=0.05,
-            sensitivity_estimator="combined"
+            sensitivity_estimator="schematic_adherence"
         )
         
         try:
@@ -563,7 +360,7 @@ class TestIntegrationWithDifferentialDebias:
         debiaser = DifferentialDebias(
             tau=0.5,
             delta=0.05,
-            sensitivity_estimator="combined"
+            sensitivity_estimator="schematic_adherence"
         )
         
         try:
