@@ -1,28 +1,28 @@
 {
   "combined_abb_conservative": {
     "estimator": "fixed",
-    "tau": 1.2,
-    "delta": 0.15,
+    "tau": 1.0,
+    "delta": 0.05,
     "use_average_case": true,
     "extra_params": {}
   },
   "combined_abb_rms": {
     "estimator": "fixed",
-    "tau": 1.2,
-    "delta": 0.1,
+    "tau": 1.0,
+    "delta": 0.05,
     "use_average_case": true,
     "extra_params": {}
   },
   "combined_abb_weighted": {
     "estimator": "fixed",
-    "tau": 1.2,
-    "delta": 0.1,
+    "tau": 1.0,
+    "delta": 0.05,
     "use_average_case": true,
     "extra_params": {}
   },
   "abb_formatting_only": {
     "estimator": "fixed",
-    "tau": 1.2,
+    "tau": 1.0,
     "delta": 0.05,
     "use_average_case": true,
     "extra_params": {}

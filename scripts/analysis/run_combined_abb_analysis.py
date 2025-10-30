@@ -127,8 +127,10 @@ def run_combined_abb_analysis(
     strict_abb: bool = False,
     enable_shrinkage: bool = False,
     target_tau: Optional[float] = None,
+    target_delta: Optional[float] = None,
     shrink_alpha: Optional[float] = None,
     shrink_center: str = "mean",
+    abb_dimensionality: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Run Combined A-BB debiasing approaches on the judge data."""
     print(f"\nRunning Combined A-BB analysis for {judge_name}...")
@@ -183,13 +185,22 @@ def run_combined_abb_analysis(
             # Base parameters
             # If a global target_tau is provided, use it for all strategies
             effective_tau = float(target_tau) if target_tau is not None else float(approach_config.get('tau', 2.0))
+            effective_delta = (
+                float(target_delta)
+                if target_delta is not None
+                else float(approach_config.get('delta', 0.1))
+            )
+
             init_params = {
                 'tau': effective_tau,
-                'delta': approach_config.get('delta', 0.1),
+                'delta': effective_delta,
                 'sensitivity_estimator': approach_config['estimator'],
                 'use_average_case': approach_config.get('use_average_case', True),
-                'random_seed': 42
+                'random_seed': 42,
             }
+
+            if abb_dimensionality is not None:
+                init_params['dimensionality'] = int(abb_dimensionality)
 
             # Shrinkage controls (from function parameters)
             if bool(enable_shrinkage):
@@ -230,7 +241,6 @@ def run_combined_abb_analysis(
                     'correlation': 1.0,
                     'mean_absolute_difference': 0.0,
                     'variance_ratio': 1.0,
-                    'signal_preservation': 1.0,
                     'noise_level': 0.0
                 }
             else:
@@ -404,7 +414,6 @@ def run_combined_abb_analysis(
                     'correlation': float(validation['correlation']),
                     'mean_absolute_difference': float(validation['mean_absolute_difference']),
                     'variance_ratio': float(validation['variance_ratio']),
-                    'signal_preservation': float(validation['signal_preservation']),
                     'noise_level': float(validation['noise_level'])
                 },
                 'n_samples': int(len(original_scores))
@@ -615,8 +624,10 @@ def main(args):
                 strict_abb=bool(getattr(args, 'strict_abb', False)),
                 enable_shrinkage=bool(getattr(args, 'enable_shrinkage', False)),
                 target_tau=getattr(args, 'target_tau', None),
+                target_delta=getattr(args, 'target_delta', None),
                 shrink_alpha=getattr(args, 'shrink_alpha', None),
                 shrink_center=str(getattr(args, 'shrink_center', 'mean')),
+                abb_dimensionality=getattr(args, 'abb_dimensionality', None),
             )
             
             # Save debiased scores to individual model JSONL files
@@ -691,10 +702,14 @@ if __name__ == "__main__":
                         help="Enable shrinkage (contractive) mapping before Gaussian noise")
     parser.add_argument("--target-tau", type=float, default=None,
                         help="Target tau (original score units) to calibrate shrinkage alpha if shrink-alpha not provided")
+    parser.add_argument("--target-delta", type=float, default=None,
+                        help="Override delta for all strategies (must be in (0,1))")
     parser.add_argument("--shrink-alpha", type=float, default=None,
                         help="Explicit shrinkage alpha in (0,1]; overrides target-tau calibration if provided")
     parser.add_argument("--shrink-center", type=str, default="mean",
                         help="Shrinkage center: mean|median|holdout_mean|profile_mean|ema(0.9)|zero|one")
+    parser.add_argument("--abb-dimensionality", type=int, default=None,
+                        help="Override effective dimensionality used for A-BB noise (defaults to sample count)")
     
     args = parser.parse_args()
     
