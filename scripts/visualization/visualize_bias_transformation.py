@@ -70,7 +70,7 @@ def try_load_from_csv(judge_dir: Path, output_dir: Path) -> Optional[Dict[str, D
     # Extract approach from output_dir name
     output_name = output_dir.name
     approach = None
-    for strategy in ['conservative', 'rms', 'weighted', 'montecarlo', 'formatting_only']:
+    for strategy in ['conservative', 'rms', 'formatting_only']:
         if strategy in output_name:
             approach = strategy
             break

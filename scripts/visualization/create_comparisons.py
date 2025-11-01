@@ -38,9 +38,7 @@ def run_visualization_comparison(judge_name: str, strategy: str, base_path: Path
     strategy_to_approach = {
         "conservative": "combined_abb_conservative",
         "rms": "combined_abb_rms",
-        "weighted": "combined_abb_weighted",
         "formatting_only": "abb_formatting_only",
-        "montecarlo": "combined_abb_conservative"  # Use conservative as fallback for montecarlo
     }
     
     approach_name = strategy_to_approach.get(strategy, strategy)
@@ -60,14 +58,88 @@ def run_visualization_comparison(judge_name: str, strategy: str, base_path: Path
     output_dir.mkdir(parents=True, exist_ok=True)
     
     try:
-        # Use the visualization module directly with JSONL data
+        # Use the visualization module directly so we can access helpers
         vbt_path = Path(__file__).parent / "visualize_bias_transformation.py"
         if not vbt_path.exists():
             raise FileNotFoundError(f"visualize_bias_transformation.py not found at {vbt_path}")
 
         mod = SourceFileLoader("visualize_bias_transformation", str(vbt_path)).load_module()
 
-        # Use the new JSONL-based visualization function
+        # Prefer precomputed ELO CSVs when available so rankings align with figures
+        def _first_existing_csv_dir(paths):
+            for candidate in paths:
+                if candidate is not None and candidate.exists() and any(candidate.glob("*.csv")):
+                    return candidate
+            return None
+
+        elo_original_dir = judge_dir / "tables" / "factor_scores_original_cis"
+        if not elo_original_dir.exists() or not list(elo_original_dir.glob("*.csv")):
+            elo_original_dir = None
+
+        elo_candidates = [
+            judge_dir / f"tables_debiased_{strategy}" / "tables" / "factor_scores_updated_cis_elo",
+        ]
+        if approach_name != strategy:
+            elo_candidates.append(
+                judge_dir / f"tables_debiased_{approach_name}" / "tables" / "factor_scores_updated_cis_elo"
+            )
+        elo_debiased_dir = _first_existing_csv_dir(elo_candidates)
+
+        if elo_debiased_dir:
+            try:
+                debiased_data = mod.load_ranking_data(elo_debiased_dir)
+                original_data = (
+                    mod.load_ranking_data(elo_original_dir) if elo_original_dir else {}
+                )
+
+                # Determine metrics to plot; require original data or reconstructable info
+                metrics = []
+                reconstructed_original = {}
+                for metric, deb_df in debiased_data.items():
+                    if metric in original_data:
+                        metrics.append(metric)
+                    elif "original_score" in deb_df.columns:
+                        temp = (
+                            deb_df[["model", "original_score"]]
+                            .rename(columns={"original_score": "score"})
+                            .copy()
+                        )
+                        temp["CI"] = (
+                            deb_df["CI"]
+                            if "CI" in deb_df.columns
+                            else ["(0.00, +0.00)"] * len(temp)
+                        )
+                        reconstructed_original[metric] = temp
+                        metrics.append(metric)
+
+                available_original = {**original_data, **reconstructed_original}
+                metrics = [m for m in metrics if m in available_original]
+
+                if not metrics:
+                    raise ValueError("No overlapping metrics between original and debiased ELO CSVs")
+
+                for metric in sorted(metrics):
+                    line_plot_path = output_dir / f"line_comparison_{metric}.png"
+                    mod.create_line_plot_comparison(
+                        available_original, debiased_data, metric, line_plot_path
+                    )
+
+                    cd_plot_path = output_dir / f"critical_difference_{metric}.png"
+                    mod.create_critical_difference_plot(
+                        available_original, debiased_data, metric, cd_plot_path
+                    )
+
+                summary_path = output_dir / "summary_comparison.png"
+                mod.create_summary_comparison(
+                    available_original, debiased_data, summary_path
+                )
+
+                print(f"  ✅ Success! Visualizations saved to: {output_dir}")
+                return True
+            except Exception as exc:
+                print(f"  ⚠️  Failed to use ELO CSVs ({exc}); falling back to JSONL processing")
+
+        # Fallback: use JSONL-based visualization
         result = mod.visualize_from_jsonl(judge_dir, output_dir)
         
         if result == 0:
@@ -96,7 +168,7 @@ def find_available_judges(base_path: Path) -> Dict[str, List[str]]:
         "GPT-4o-mini-0718-setting1"
     ]
     
-    strategies = ["conservative", "rms", "weighted", "montecarlo", "formatting_only"]
+    strategies = ["conservative", "rms", "formatting_only"]
     
     for judge in judge_patterns:
         judge_dir = base_path / judge

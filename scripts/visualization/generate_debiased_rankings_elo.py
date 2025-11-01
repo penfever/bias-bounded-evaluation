@@ -175,8 +175,6 @@ def _normalize_strategy(approach: str) -> str:
     m = {
         'combined_abb_conservative': 'conservative',
         'combined_abb_rms': 'rms',
-        'combined_abb_weighted': 'weighted',
-        'combined_abb_montecarlo': 'montecarlo',
         'abb_formatting_only': 'formatting_only',
     }
     return m.get(approach, approach)

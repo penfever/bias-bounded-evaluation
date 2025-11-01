@@ -128,7 +128,7 @@ def save_rankings_for_judge_from_jsonl(judge_name: str, output_base_path: Path, 
     
     # Default strategies if not provided
     if strategies is None:
-        strategies = ['conservative', 'rms', 'weighted', 'montecarlo', 'formatting_only']
+        strategies = ['conservative', 'rms', 'formatting_only']
     
     # Load judge data from JSONL files
     judge_dir = output_base_path / judge_name
@@ -308,7 +308,7 @@ def main():
     
     # Count generated files
     total_files = 0
-    strategies = ['conservative', 'rms', 'weighted', 'montecarlo', 'formatting_only']
+    strategies = ['conservative', 'rms', 'formatting_only']
     for judge_name in found_judges:
         for strategy in strategies:
             ranking_dir = data_base_path / judge_name / f"tables_debiased_{strategy}" / "tables" / "factor_scores_updated_cis"

@@ -101,6 +101,12 @@ for judge_dir in "${settings[@]}"; do
       else
         approach_suffix=${base_name#base_debiased_}
       fi
+      case "$approach_suffix" in
+        weighted|combined_abb_weighted|montecarlo|combined_abb_montecarlo)
+          print_warning "Skipping ELO generation for $(basename "$judge_dir") [$approach_suffix] (strategy disabled)"
+          continue
+          ;;
+      esac
       print_status "Debiased ELO ($approach_suffix) for $(basename "$judge_dir")"
       echo "python generate_debiased_rankings_elo.py --setting-dir \"$judge_dir\" --approach \"$approach_suffix\" --debiased-dir \"$strat_dir\" --metric all --rounds $ELO_ROUNDS"
       python generate_debiased_rankings_elo.py \
@@ -145,8 +151,6 @@ normalize_approach() {
   case "$a" in
     combined_abb_conservative) printf '%s\n' conservative ;;
     combined_abb_rms)          printf '%s\n' rms ;;
-    combined_abb_weighted)     printf '%s\n' weighted ;;
-    combined_abb_montecarlo)   printf '%s\n' montecarlo ;;
     abb_*)                     printf '%s\n' "${a#abb_}" ;;
     *)                         printf '%s\n' "$a" ;;
   esac
@@ -168,6 +172,12 @@ for judge_dir in "$DATA_BASE"/*-setting*; do
     else
       suffix=${approach#base_debiased_}
     fi
+    case "$suffix" in
+      weighted|combined_abb_weighted|montecarlo|combined_abb_montecarlo)
+        print_warning "Skipping visualizations for $judge_name [$suffix] (strategy disabled)"
+        continue
+        ;;
+    esac
     norm_approach=$(normalize_approach "$suffix")
     # Prefer normalized directory; fall back to raw approach; finally scan for a matching dir
     elo_deb_dir="$judge_dir/tables_debiased_${norm_approach}/tables/factor_scores_updated_cis_elo"
