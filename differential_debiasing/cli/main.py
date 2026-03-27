@@ -13,6 +13,7 @@ from typing import Dict, Any, List, Optional
 
 from ..core.debias import DifferentialDebias
 from ..core.utils import validate_input_array
+from ..benchmarks import get_loader, LOADER_REGISTRY
 
 
 def load_jsonl(filepath: str) -> List[Dict[str, Any]]:
@@ -118,6 +119,16 @@ def main():
     parser.add_argument('--target-column', default='overall_score',
                        help='Target score column name (for schematic_adherence method)')
     
+    # Benchmark loader
+    parser.add_argument('--benchmark', choices=sorted(LOADER_REGISTRY.keys()),
+                       help='Benchmark loader to use for data loading. When set, '
+                            'the loader handles score parsing and provides the '
+                            'score range to the debiasing mechanism.')
+    parser.add_argument('--item-id-field', default='item_id',
+                       help='Field name for item identifiers (used with --benchmark generic_jsonl)')
+    parser.add_argument('--model-field', default='model',
+                       help='Field name for model identifiers (used with --benchmark generic_jsonl)')
+
     # Options
     parser.add_argument('--no-average-case', action='store_true',
                        help='Disable average-case optimization')
@@ -136,22 +147,44 @@ def main():
         sys.exit(1)
     
     try:
-        # Load data
-        if args.verbose:
-            print(f"Loading data from {args.input}")
-        data = load_jsonl(args.input)
-        print(f"Loaded {len(data)} records")
-        
-        # Extract scores
-        if args.verbose:
-            print(f"Extracting scores from field '{args.score_field}'")
-        scores = extract_scores_from_jsonl(data, args.score_field)
+        # Load data — either via benchmark loader or raw JSONL
+        score_min_override = None
+        score_max_override = None
+
+        if args.benchmark:
+            if args.verbose:
+                print(f"Loading data via '{args.benchmark}' benchmark loader")
+            loader_kwargs = {}
+            if args.benchmark == "generic_jsonl":
+                loader_kwargs.update(
+                    item_id_field=args.item_id_field,
+                    model_field=args.model_field,
+                    score_field=args.score_field,
+                )
+            loader = get_loader(args.benchmark, **loader_kwargs)
+            loader_df = loader.load_scores(Path(args.input))
+            print(f"Loaded {len(loader_df)} records via {loader.name} loader")
+
+            scores = loader_df["score"].values.astype(float)
+            score_min_override, score_max_override = loader.score_type.score_range
+            # Keep raw data for output
+            data = load_jsonl(args.input)
+        else:
+            if args.verbose:
+                print(f"Loading data from {args.input}")
+            data = load_jsonl(args.input)
+            print(f"Loaded {len(data)} records")
+
+            if args.verbose:
+                print(f"Extracting scores from field '{args.score_field}'")
+            scores = extract_scores_from_jsonl(data, args.score_field)
+
         print(f"Found {len(scores)} valid scores")
-        
+
         if len(scores) == 0:
             print("Error: No valid scores found", file=sys.stderr)
             sys.exit(1)
-        
+
         # Set up sensitivity estimator kwargs
         estimator_kwargs = {}
         if args.sensitivity_method in ('schematic_adherence', 'psychometric_reliability'):
@@ -160,11 +193,11 @@ def main():
             estimator_kwargs['target_column'] = args.target_column
         if args.sensitivity_method == 'fixed' and args.sensitivity_value is not None:
             estimator_kwargs['fixed_sensitivity_value'] = args.sensitivity_value
-        
+
         # Create debiasing mechanism
         if args.verbose:
             print(f"Creating debiasing mechanism with τ={args.tau}, δ={args.delta}")
-        
+
         debias = DifferentialDebias(
             tau=args.tau,
             delta=args.delta,
@@ -173,21 +206,33 @@ def main():
             random_seed=args.seed,
             **estimator_kwargs
         )
-        
+
         # Fit and transform
         if args.verbose:
             print("Fitting debiasing mechanism")
-        
+
         # For static estimators that rely on factor columns, we need the full DataFrame
         if args.sensitivity_method in ('schematic_adherence', 'psychometric_reliability') and len(data) > 0:
             # Convert to DataFrame so the estimator can access factor columns
             df = pd.DataFrame(data)
             debias.fit(df)
-            debiased_scores = debias.transform(scores)
+            debiased_scores = debias.transform(
+                scores,
+                score_min=score_min_override,
+                score_max=score_max_override,
+            )
         else:
             # For other methods, scores are sufficient
-            debiased_scores = debias.fit_transform(scores)
-        
+            if score_min_override is not None:
+                debias.fit(scores)
+                debiased_scores = debias.transform(
+                    scores,
+                    score_min=score_min_override,
+                    score_max=score_max_override,
+                )
+            else:
+                debiased_scores = debias.fit_transform(scores)
+
         print(f"Applied debiasing to {len(debiased_scores)} scores")
         
         # Apply debiased scores back to data

@@ -19,6 +19,7 @@ from differential_debiasing.interfaces.arena_hard_utils import (
     bootstrap_to_win_rate_ci,
 )
 from differential_debiasing.interfaces import get_arena_score_mapping
+from differential_debiasing.benchmarks import BenchmarkLoader
 
 
 def get_project_paths() -> Dict[str, Path]:
@@ -410,7 +411,19 @@ def create_ranking_dataframe(model_scores: pd.DataFrame,
     return ranking_df
 
 
-def load_judge_data_for_visualization(judge_dir: Union[str, Path], 
+def load_scores_via_loader(
+    loader: BenchmarkLoader,
+    path: Union[str, Path],
+) -> pd.DataFrame:
+    """Load evaluation data using a BenchmarkLoader and return a standardised DataFrame.
+
+    This is a convenience entry-point for non-Arena-Hard benchmarks.  The
+    returned DataFrame has at least ``item_id``, ``model``, ``score`` columns.
+    """
+    return loader.load_scores(Path(path))
+
+
+def load_judge_data_for_visualization(judge_dir: Union[str, Path],
                                     approach: Optional[str] = None,
                                     convert_to_win_rates: bool = True) -> Dict[str, pd.DataFrame]:
     """

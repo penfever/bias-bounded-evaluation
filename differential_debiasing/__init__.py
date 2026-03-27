@@ -31,6 +31,13 @@ from .interfaces import (
     create_judge_function
 )
 
+# Benchmark loaders
+from .benchmarks import (
+    BenchmarkLoader,
+    ScoreType,
+    get_loader,
+)
+
 __version__ = "0.1.0"
 __author__ = "Benjamin Feuer"
 __email__ = "penfever@gmail.com"
@@ -52,4 +59,9 @@ __all__ = [
     # Judge interfaces
     "create_oumi_judge_function",
     "create_judge_function",
+
+    # Benchmark loaders
+    "BenchmarkLoader",
+    "ScoreType",
+    "get_loader",
 ]
